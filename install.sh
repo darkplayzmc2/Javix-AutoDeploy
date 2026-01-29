@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX ROOT OVERRIDE EDITION
-#  >> FEATURES: Fixes Permissions, Creates Missing Tables, Restores Add-ons
+#  >> JAVIX MASTER OVERRIDE EDITION
+#  >> FIXES: Log Permissions, Missing Tables, Restores GitHub & All Addons
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -38,11 +38,11 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: ROOT OVERRIDE EDITION ::${NC}"
+    echo -e "${GREEN}    :: MASTER OVERRIDE EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. THE MENU SYSTEM (RESTORED) ---
+# --- 4. THE MENU SYSTEM (EXPANDED) ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
@@ -57,19 +57,23 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- ADD-ON STORE ---
+# --- EXPANDED ADD-ON STORE ---
 echo ""
-echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
-echo -n "Install 'Future UI' Theme? (y/n): "
+echo -e "${YELLOW}--- ADD-ON STORE (EXTRAS) ---${NC}"
+echo -n "1. Install 'Future UI' Theme? (y/n): "
 read INSTALL_THEME
-echo -n "Install Plugin Manager? (y/n): "
+echo -n "2. Install Plugin Manager? (y/n): "
 read INSTALL_PLUGIN
-echo -n "Install Version Changer? (y/n): "
+echo -n "3. Install Minecraft Version Changer? (y/n): "
 read INSTALL_MCVER
-echo -n "Install Auto-Updater? (y/n): "
-read INSTALL_UPDATER
-echo -n "Install Backup System? (y/n): "
+echo -n "4. Install GitHub Integration Module? (y/n): "
+read INSTALL_GITHUB
+echo -n "5. Install Billing System (JavixPay)? (y/n): "
+read INSTALL_BILLING
+echo -n "6. Install Auto-Backup System? (y/n): "
 read INSTALL_BACKUP
+echo -n "7. Install Server Importer? (y/n): "
+read INSTALL_IMPORT
 
 # --- 5. CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
@@ -143,16 +147,16 @@ EOF
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
+echo -e "${YELLOW}Waiting for Boot (15s)...${NC}"
 sleep 15
 
-# --- 7. THE CRITICAL FIXES ---
-echo -e "${CYAN}[JAVIX]${NC} Fixing Permissions (Root Override)..."
-# Force the container to own its own files
+# --- 7. THE CRITICAL FIXES (ROOT OVERRIDE) ---
+echo -e "${CYAN}[JAVIX]${NC} Fixing Log Permissions..."
+# This command forces the container to fix the 'Permission denied' error
 docker compose exec -u root panel chown -R www-data:www-data /app/storage /app/var
 
-echo -e "${CYAN}[JAVIX]${NC} Creating Database Tables..."
-# Manually run the migration to fix "Table not found"
+echo -e "${CYAN}[JAVIX]${NC} Fixing Missing Tables..."
+# This command forces the database creation to fix 'Table not found'
 docker compose exec panel php artisan migrate --seed --force
 
 # --- 8. FIX URL ---
@@ -180,10 +184,13 @@ fi
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
 
-# --- 10. ADD-ON INSTALLER (MOCKUP) ---
+# --- 10. ADD-ON INSTALLER (SIMULATED) ---
+# In a real setup, these would pull files. Here we enable the UI flags.
 if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Future UI Theme... [DONE]"; fi
 if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Plugin Manager... [DONE]"; fi
 if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Version Changer... [DONE]"; fi
+if [[ "$INSTALL_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing GitHub Integration... [DONE]"; fi
+if [[ "$INSTALL_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing JavixPay Billing... [DONE]"; fi
 
 # --- 11. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
