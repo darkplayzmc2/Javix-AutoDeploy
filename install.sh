@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX BLUEPRINT / CLEAN EDITION
-#  >> FEATURES: No Themes, No Addons, Just a working Panel.
+#  >> JAVIX LOW RAM EDITION (STABILITY FIX)
+#  >> FEATURES: Optimized for CodeSandbox Free Tier (Prevents 502 Crashes)
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,16 +11,17 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. GENERATE UNIQUE ID (Crucial for fixing permissions)
+# 2. GENERATE UNIQUE ID
 RUN_ID="run_$(date +%s)"
-echo "Starting Clean Install (Session: $RUN_ID)..."
+echo "Starting Low-RAM Install (Session: $RUN_ID)..."
 
-# 3. CLEANUP
-echo "Wiping old data..."
+# 3. CLEANUP (Wipe everything to free up RAM)
+echo "Freeing up memory..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
+sync; echo 3 > /proc/sys/vm/drop_caches
 
-# Fix missing tools
+# Fix tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
@@ -42,7 +43,7 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: BLUEPRINT / CLEAN EDITION ::${NC}"
+    echo -e "${GREEN}    :: LOW RAM STABILITY EDITION ::${NC}"
     echo ""
 }
 
@@ -61,8 +62,6 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# (REMOVED ALL ADDON QUESTIONS - PURE INSTALL ONLY)
-
 # --- 6. CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
 mkdir -p /etc/javix
@@ -75,14 +74,15 @@ if [ "$ENV_TYPE" == "1" ]; then
     APP_URL="https://${FQDN}"
 fi
 
-# --- DOCKER COMPOSE (ROOT + CLEAN) ---
+# --- DOCKER COMPOSE (LOW RAM TUNED) ---
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
   database:
     image: mariadb:10.5
     restart: always
-    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
+    # ULTRA LOW RAM SETTINGS
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=5M --innodb-log-buffer-size=256K --max-connections=20
     volumes:
       - javix_db_$RUN_ID:/var/lib/mysql
     environment:
@@ -98,7 +98,7 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root  # <--- Fixes Permission Denied
+    user: root  # Fixes Permission Denied
     ports:
       - "3000:80"
     environment:
@@ -118,8 +118,8 @@ services:
       - SESSION_DRIVER=redis
       - QUEUE_CONNECTION=redis
       - REDIS_HOST=cache
-    # FORCE DATABASE CREATION ON BOOT
-    command: sh -c "sleep 10 && php artisan migrate --seed --force && /usr/bin/supervisord -c /etc/supervisord.conf"
+    # WAIT 30 SECONDS BEFORE STARTING TO PREVENT CRASH
+    command: sh -c "echo 'Waiting for DB...' && sleep 30 && php artisan migrate --seed --force && /usr/bin/supervisord -c /etc/supervisord.conf"
     depends_on:
       - database
       - cache
@@ -139,8 +139,9 @@ EOF
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Clean Install (30s)...${NC}"
-sleep 30
+echo -e "${YELLOW}Waiting for Low-RAM Boot (40s)...${NC}"
+# We wait 40s because we told the container to sleep for 30s
+sleep 40
 
 # --- 8. FIX URL ---
 if [ "$ENV_TYPE" == "2" ]; then
@@ -165,10 +166,11 @@ fi
 
 # --- 9. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
+# Retry loop for slow starts
 for i in {1..5}; do
     docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 && break
-    echo "Retrying..."
-    sleep 5
+    echo "Retrying Admin Creation (DB might be waking up)..."
+    sleep 10
 done
 
 # --- 10. WINGS ---
@@ -185,7 +187,6 @@ echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
     echo -e "URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
-    echo -e "Theme: ${GREEN}Default (Blue/Clean)${NC}"
 else
     echo "URL: https://$FQDN"
 fi
