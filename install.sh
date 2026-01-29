@@ -1,160 +1,151 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX-AUTODEPLOY | FINAL STABLE EDITION
-#  >> FEATURES: Menu System, Port 80 Force, Auto-Dependency Installer
+#  >> JAVIX REPAIR & DOCKER INSTALLER
+#  >> AUTOMATICALLY FIXES MISSING COMMANDS & INSTALLS PANEL
 # ==============================================================================
 
-# --- 0. CHECK & ELEVATE ---
+# 1. EMERGENCY REPAIR (Fixes 'command not found' errors)
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ ! -c /dev/null ]; then
+    rm -f /dev/null
+    mknod -m 666 /dev/null c 1 3
+fi
+
+# Force install basic tools if they are missing
+if ! command -v curl &> /dev/null; then
+    echo "Repairing System Tools..."
+    apt-get update -y
+    apt-get install -y curl sudo git
+fi
+
+# 2. AUTO-ELEVATION
 if [ "$EUID" -ne 0 ]; then
   sudo "$0" "$@"
   exit
 fi
 
-# --- 1. PRE-FLIGHT CHECK (ENSURES TOOLS EXIST) ---
-echo "Checking Environment..."
-if ! command -v curl &> /dev/null; then
-    echo "Installing missing core tools..."
-    apt-get update -y
-    apt-get install -y curl tar unzip git jq certbot
-fi
-
-# --- 2. VISUALS ---
+# 3. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
-logo() {
-    clear
-    echo -e "${CYAN}"
-    echo "       ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
-    echo "       ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
-    echo "       ██║███████║██║   ██║██║ ╚███╔╝ "
-    echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
-    echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
-    echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: FINAL STABLE EDITION ::${NC}"
-    echo ""
-}
-
-# --- 3. THE MENU SYSTEM ---
-logo
-echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
-echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
-echo "2) CodeSandbox (Free - Forces Port 80)"
-echo "3) GitHub Codespaces (Free - Forces Tunnel)"
+clear
+echo -e "${CYAN}"
+echo "   ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
+echo "   ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
+echo "   ██║███████║██║   ██║██║ ╚███╔╝ "
+echo "   ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
+echo -e "${GREEN}   :: DOCKER REPAIR EDITION ::${NC}"
 echo ""
-echo -n "Select your environment [1-3]: "
-read ENV_TYPE
 
-echo ""
-echo -e "${YELLOW}--- COMPONENT SELECTION ---${NC}"
-echo "1) Full Stack (Panel + Wings)"
-echo "2) Wings Only"
-echo "3) Panel Only"
-echo ""
-echo -n "Select install mode [1-3]: "
-read INSTALL_MODE
-
-# --- 4. CLEANUP & PREP ---
-echo -e "${CYAN}[JAVIX]${NC} Cleaning up..."
-rm -rf /var/www/pterodactyl /etc/pterodactyl /usr/local/bin/wings
-# Ignore docker errors
-docker rm -f $(docker ps -a -q) >/dev/null 2>&1
-
-echo -e "${CYAN}[JAVIX]${NC} Installing Dependencies..."
-# Install Docker
+# 4. INSTALL DOCKER (The Engine)
+echo "Installing Docker Engine..."
 if ! command -v docker &> /dev/null; then
-    curl -sSL https://get.docker.com/ | CHANNEL=stable bash
-fi
-service docker start
-# Install Database
-apt-get install -y mariadb-server mariadb-client
-service mariadb start
-
-# --- 5. PANEL INSTALLATION ---
-if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "3" ]; then
-    echo -e "${CYAN}[JAVIX]${NC} Installing Panel..."
-    
-    # Database
-    mysql -u root -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY 'javix123';"
-    mysql -u root -e "CREATE DATABASE IF NOT EXISTS panel;"
-    mysql -u root -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
-    mysql -u root -e "FLUSH PRIVILEGES;"
-
-    # Files
-    mkdir -p /var/www/pterodactyl
-    cd /var/www/pterodactyl
-    curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
-    tar -xzvf panel.tar.gz
-    chmod -R 755 storage bootstrap/cache
-
-    # PHP & Composer
-    apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip}
-    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-    cp .env.example .env
-    composer install --no-dev --optimize-autoloader --no-interaction
-    php artisan key:generate --force
-
-    # --- ENVIRONMENT CONFIG ---
-    if [ "$ENV_TYPE" == "2" ]; then
-        # CODESANDBOX LOGIC
-        echo -e "${GREEN}Configuring for CodeSandbox (Port 80)...${NC}"
-        sed -i "s|APP_URL=http://localhost|APP_URL=http://localhost|g" .env
-        sed -i "s|APP_URL=https://panel.example.com|APP_URL=http://localhost|g" .env
-        sed -i 's/DB_PASSWORD=/DB_PASSWORD=javix123/g' .env
-        
-        # Kill anything on port 80 and start
-        fuser -k 80/tcp >/dev/null 2>&1
-        nohup php artisan serve --host=0.0.0.0 --port=80 > panel.log 2>&1 &
-        FQDN="localhost"
-    
-    elif [ "$ENV_TYPE" == "1" ]; then
-        # PAID VPS LOGIC
-        echo -e "${YELLOW}Enter your Domain (FQDN):${NC}"
-        read FQDN
-        sed -i "s|APP_URL=http://localhost|APP_URL=https://${FQDN}|g" .env
-        php artisan p:environment:setup --author=admin@javix.com --url=https://$FQDN --timezone=UTC --cache=redis --session=redis --queue=redis --redis-host=127.0.0.1 --redis-pass= --redis-port=6379
-    fi
-
-    # Finalize
-    php artisan migrate --seed --force
-    php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
 fi
 
-# --- 6. WINGS INSTALLATION ---
-if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
-    echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
-    mkdir -p /etc/pterodactyl
-    curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
-    chmod u+x /usr/local/bin/wings
-fi
+# 5. SETUP WORKSPACE
+echo "Creating Javix Workspace..."
+mkdir -p /etc/javix
+cd /etc/javix
 
-# --- 7. FINAL OUTPUT ---
-logo
+# 6. CREATE DOCKER COMPOSE FILE (The Engine Room)
+# This creates the Panel, Database, and Cache containers automatically.
+cat > docker-compose.yml <<EOF
+version: '3.8'
+services:
+  database:
+    image: mariadb:10.5
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - "/var/lib/javix/database:/var/lib/mysql"
+    environment:
+      - MYSQL_ROOT_PASSWORD=javix_root
+      - MYSQL_DATABASE=panel
+      - MYSQL_USER=pterodactyl
+      - MYSQL_PASSWORD=javix123
+    ports:
+      - "3306:3306"
+
+  cache:
+    image: redis:alpine
+    restart: always
+
+  panel:
+    image: ghcr.io/pterodactyl/panel:latest
+    restart: always
+    ports:
+      - "80:80"
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_THEME=pterodactyl
+      - APP_URL=http://localhost
+      - APP_TIMEZONE=UTC
+      - APP_SERVICE_AUTHOR=admin@javix.com
+      - DB_HOST=database
+      - DB_PORT=3306
+      - DB_DATABASE=panel
+      - DB_USERNAME=pterodactyl
+      - DB_PASSWORD=javix123
+      - CACHE_DRIVER=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - REDIS_HOST=cache
+    depends_on:
+      - database
+      - cache
+    volumes:
+      - "/var/www/javix/var/:/app/var/"
+      - "/var/www/javix/storage/logs:/app/storage/logs"
+      - "/var/www/javix/storage/app/public:/app/storage/app/public"
+EOF
+
+# 7. START EVERYTHING
+echo "Starting Containers..."
+# Remove old containers if they exist
+docker compose down >/dev/null 2>&1
+# Start new ones
+docker compose up -d
+
+echo "Waiting for Database to wake up (10s)..."
+sleep 10
+
+# 8. CONFIGURE PANEL (Inside the container)
+echo "Generating Admin User..."
+docker compose exec -T panel php artisan key:generate --force
+docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+
+# 9. INSTALL WINGS (On Host)
+echo "Installing Wings..."
+curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
+chmod u+x /usr/local/bin/wings
+
+# 10. FINAL OUTPUT
+clear
 echo "=========================================="
-echo "      INSTALLATION COMPLETE"
+echo "      JAVIX INSTALL COMPLETE"
 echo "=========================================="
-if [ "$ENV_TYPE" == "2" ]; then
-    echo "MODE: CodeSandbox (Port 80)"
-    echo "1. Look at 'PORTS' tab -> Port 80 should be there."
-    echo "2. Create Node FQDN: localhost"
-else
-    echo "MODE: Standard"
-    echo "URL: https://$FQDN"
-fi
+echo "1. Go to CodeSandbox 'PORTS' tab -> Open Port 80."
+echo "2. Login: admin@javix.com / javix123"
 echo "=========================================="
-echo "Login: admin@javix.com / javix123"
+echo "3. Create Node FQDN: localhost"
+echo "4. Paste 'wings configure' command below:"
 echo "=========================================="
 echo ""
+echo -n "PASTE COMMAND: "
+read WINGS_CMD
 
-if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
-    echo -e "${YELLOW}PASTE YOUR 'wings configure' COMMAND BELOW:${NC}"
-    read WINGS_CMD
-    echo "Configuring Wings..."
-    eval "$WINGS_CMD"
-    wings --debug > wings.log 2>&1 &
-    echo -e "${GREEN}SUCCESS! Wings is running.${NC}"
-fi
+echo "Configuring Wings..."
+eval "$WINGS_CMD"
+
+# Patch config to allow Docker networking
+sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
+
+echo "Starting Wings..."
+wings --debug > wings.log 2>&1 &
+echo "SUCCESS. JAVIX IS ONLINE."
