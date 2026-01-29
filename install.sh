@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX MASTER DOCKER EDITION
-#  >> FEATURES: Full Menus, Add-ons, Port 5000 Fix, Auto-Repair
+#  >> JAVIX UNIVERSAL FIXER
+#  >> FEATURES: Fixes 'Invalid Request URL', Menus, Add-ons, Port 5000
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,7 +11,7 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. EMERGENCY REPAIR (Fixes missing tools)
+# 2. EMERGENCY REPAIR
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
@@ -34,15 +34,15 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: MASTER DOCKER EDITION ::${NC}"
+    echo -e "${GREEN}    :: UNIVERSAL FIXER EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. THE MENU SYSTEM (COMPLETELY RESTORED) ---
+# --- 4. THE MENU SYSTEM ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
 echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
-echo "2) CodeSandbox (Free - Uses Port 5000)"
+echo "2) CodeSandbox (Free - Fixes Invalid URL Error)"
 echo ""
 echo -n "Select your environment [1-2]: "
 read ENV_TYPE
@@ -56,9 +56,9 @@ echo ""
 echo -n "Select install mode [1-3]: "
 read INSTALL_MODE
 
-# --- ADD-ON MENU (RESTORED) ---
+# --- ADD-ON MENU ---
 echo ""
-echo -e "${YELLOW}--- ADD-ON STORE (EXTRAS) ---${NC}"
+echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
 echo -n "Install 'Future UI' Theme? (y/n): "
 read INSTALL_THEME
 echo -n "Install Plugin Manager System? (y/n): "
@@ -66,14 +66,14 @@ read INSTALL_PLUGIN
 echo -n "Install Minecraft Version Changer? (y/n): "
 read INSTALL_MCVER
 
-# --- 5. PORT CONFIGURATION (FIXED) ---
+# --- 5. INITIAL CONFIGURATION ---
 if [ "$ENV_TYPE" == "2" ]; then
-    # CODESANDBOX MODE: Use Port 5000 (Safe Port)
+    # CODESANDBOX: We start with a placeholder, then fix it later
     APP_PORT="5000"
     APP_URL="http://localhost:5000"
-    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Switching to Port 5000.${NC}"
+    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Will ask for URL later to fix 'Invalid Request'.${NC}"
 else
-    # VPS MODE: Use Standard Port 80
+    # VPS MODE
     APP_PORT="80"
     echo -e "${YELLOW}Enter your Domain (FQDN):${NC}"
     read FQDN
@@ -93,11 +93,6 @@ fi
 echo -e "${CYAN}[JAVIX]${NC} Generating Configuration..."
 mkdir -p /etc/javix
 cd /etc/javix
-
-# Processing Add-ons (Visual Log)
-if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Future UI Theme..."; fi
-if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Plugin Manager..."; fi
-if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Version Changer..."; fi
 
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -127,11 +122,12 @@ services:
       - "${APP_PORT}:80"
     environment:
       - APP_ENV=production
-      - APP_DEBUG=false
+      - APP_DEBUG=true
       - APP_THEME=pterodactyl
       - APP_URL=${APP_URL}
       - APP_TIMEZONE=UTC
       - APP_SERVICE_AUTHOR=admin@javix.com
+      - TRUSTED_PROXIES=*
       - DB_HOST=database
       - DB_PORT=3306
       - DB_DATABASE=panel
@@ -152,7 +148,6 @@ EOF
 
 # --- 8. START CONTAINERS ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Panel on Port ${APP_PORT}..."
-# Force kill any old containers or blocked ports
 docker compose down >/dev/null 2>&1
 docker compose up -d
 
@@ -164,23 +159,50 @@ echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
 docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# --- 10. INSTALL WINGS ---
+# --- 10. CRITICAL FIX FOR CODESANDBOX ---
+if [ "$ENV_TYPE" == "2" ]; then
+    logo
+    echo -e "${YELLOW}====================================================${NC}"
+    echo -e "${YELLOW}      CRITICAL STEP: FIX 'INVALID REQUEST URL'      ${NC}"
+    echo -e "${YELLOW}====================================================${NC}"
+    echo "1. Go to the 'PORTS' tab in CodeSandbox."
+    echo "2. Find Port 5000."
+    echo "3. Copy the 'Forwarded Address' (e.g., https://abc-5000.csb.app/)"
+    echo ""
+    echo -n "PASTE THE URL HERE: "
+    read CSB_URL
+    
+    # Remove trailing slash if present
+    CSB_URL=${CSB_URL%/}
+
+    echo -e "${CYAN}[JAVIX]${NC} Patching Panel with URL: ${CSB_URL}..."
+    
+    # Update Docker Compose with correct URL
+    sed -i "s|APP_URL=http://localhost:5000|APP_URL=${CSB_URL}|g" docker-compose.yml
+    
+    # Restart to apply
+    docker compose down >/dev/null 2>&1
+    docker compose up -d
+    
+    APP_URL="${CSB_URL}"
+fi
+
+# --- 11. INSTALL WINGS ---
 if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
     echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 11. FINAL OUTPUT ---
+# --- 12. FINAL OUTPUT ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
-    echo "MODE: CodeSandbox (Port 5000)"
-    echo -e "1. Go to 'PORTS' tab -> Open Port ${GREEN}5000${NC}"
-    echo -e "2. Create Node FQDN: ${GREEN}localhost${NC}"
-    echo -e "3. Daemon Port: ${GREEN}8081${NC} (Use 8081 for Wings)"
+    echo "MODE: CodeSandbox (FIXED)"
+    echo -e "PANEL URL: ${GREEN}${APP_URL}${NC}"
+    echo -e "Node FQDN: ${GREEN}localhost${NC}"
 else
     echo "MODE: Paid VPS"
     echo "URL: https://$FQDN"
@@ -196,7 +218,6 @@ if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
     echo "Configuring Wings..."
     eval "$WINGS_CMD"
     
-    # DOCKER NETWORK FIX
     sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
     
     echo "Starting Wings..."
