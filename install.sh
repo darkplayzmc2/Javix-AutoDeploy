@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX-AUTODEPLOY | FINAL EDITION
-#  >> FEATURES: Auto-FQDN, Auto-Wings Start, Clean Exit
+#  >> JAVIX-AUTODEPLOY | CHEAT SHEET EDITION
+#  >> FEATURE: Tells you exactly what to type in the Create Node page.
 # ==============================================================================
 
 # --- 0. AUTO-ELEVATION ---
@@ -27,66 +27,40 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}      :: SYSTEM ONLINE ::${NC}"
+    echo -e "${GREEN}    :: CHEAT SHEET MODE ::${NC}"
     echo ""
 }
 
-# --- 2. CLEANUP (Wipe old data) ---
-clear
-echo -e "${CYAN}[JAVIX]${NC} Cleaning up old installation..."
+# --- 2. CLEANUP ---
+logo
+echo -e "${CYAN}[JAVIX]${NC} Cleaning up old files..."
 rm -rf /var/www/pterodactyl /etc/pterodactyl /usr/local/bin/wings
 docker rm -f $(docker ps -a -q) >/dev/null 2>&1
 echo -e "${GREEN}[DONE]${NC}"
 
-# --- 3. GENERATE FQDN (TUNNEL) ---
-echo -e "${CYAN}[JAVIX]${NC} Setting up Cloudflare Tunnel..."
+# --- 3. INSTALL DEPENDENCIES ---
+echo -e "${CYAN}[JAVIX]${NC} Installing System Requirements..."
 apt-get update -q >/dev/null 2>&1
-apt-get install -y curl tar unzip git jq certbot >/dev/null 2>&1
-
-if ! command -v cloudflared &> /dev/null; then
-    curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >/dev/null 2>&1
-    dpkg -i cloudflared.deb >/dev/null 2>&1
-fi
-
-# Start Tunnel & Wait for URL
-cloudflared tunnel --url http://localhost:80 > tunnel.log 2>&1 &
-echo -e "${YELLOW}Waiting for Auto-FQDN...${NC}"
-sleep 10
-
-# Capture URL
-AUTO_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-CLEAN_FQDN=${AUTO_URL//https:\/\//}
-
-if [ -z "$AUTO_URL" ]; then
-    echo -e "${RED}Tunnel failed. Retrying...${NC}"
-    pkill cloudflared
-    sleep 2
-    cloudflared tunnel --url http://localhost:80 > tunnel.log 2>&1 &
-    sleep 10
-    AUTO_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-    CLEAN_FQDN=${AUTO_URL//https:\/\//}
-fi
-
-# --- 4. INSTALL PANEL ---
-echo -e "${CYAN}[JAVIX]${NC} Installing Panel on: ${YELLOW}${AUTO_URL}${NC}"
+apt-get install -y curl tar unzip git jq certbot mariadb-server mariadb-client >/dev/null 2>&1
+apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip} >/dev/null 2>&1
 
 # Install Docker
 if ! command -v docker &> /dev/null; then
     curl -sSL https://get.docker.com/ | CHANNEL=stable bash >/dev/null 2>&1
 fi
 systemctl enable --now docker >/dev/null 2>&1
-
-# Install DB & PHP
-apt-get install -y mariadb-server mariadb-client php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip} >/dev/null 2>&1
 systemctl enable --now mariadb >/dev/null 2>&1
 
-# Setup DB
+# --- 4. INSTALL PANEL (PORT 80) ---
+echo -e "${CYAN}[JAVIX]${NC} Setting up Panel on Port 80..."
+
+# Setup Database
 mysql -u root -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY 'javix123';"
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS panel;"
 mysql -u root -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
 mysql -u root -e "FLUSH PRIVILEGES;"
 
-# Setup Panel Files
+# Setup Files
 mkdir -p /var/www/pterodactyl
 cd /var/www/pterodactyl
 curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz >/dev/null 2>&1
@@ -99,16 +73,16 @@ cp .env.example .env
 composer install --no-dev --optimize-autoloader --no-interaction >/dev/null 2>&1
 php artisan key:generate --force >/dev/null 2>&1
 
-# Inject FQDN
+# --- CONFIGURATION FOR CODESANDBOX ---
 sed -i 's/DB_PASSWORD=/DB_PASSWORD=javix123/g' .env
-sed -i "s|APP_URL=http://localhost|APP_URL=${AUTO_URL}|g" .env
-sed -i "s|APP_URL=https://panel.example.com|APP_URL=${AUTO_URL}|g" .env
+sed -i "s|APP_URL=http://localhost|APP_URL=http://localhost|g" .env
+sed -i "s|APP_URL=https://panel.example.com|APP_URL=http://localhost|g" .env
 
 php artisan migrate --seed --force >/dev/null 2>&1
 php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# Start Queue
-php artisan queue:work --queue=high,standard,low --sleep=3 --tries=3 >/dev/null 2>&1 &
+# Serve the panel on Port 80
+nohup php artisan serve --host=0.0.0.0 --port=80 > panel.log 2>&1 &
 
 # --- 5. INSTALL WINGS ---
 echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
@@ -116,35 +90,69 @@ mkdir -p /etc/pterodactyl
 curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
 chmod u+x /usr/local/bin/wings
 
-# --- 6. THE FINAL CONFIGURATION STEP ---
-clear
-echo -e "${CYAN}====================================================${NC}"
-echo -e "${GREEN}      PANEL INSTALLED SUCCESSFULLY ${NC}"
-echo -e "${CYAN}====================================================${NC}"
+# --- 6. THE CHEAT SHEET & WIZARD ---
+logo
+echo -e "${GREEN}PANEL INSTALLED!${NC}"
+echo -e "Login: ${CYAN}admin@javix.com${NC} / ${CYAN}javix123${NC}"
 echo ""
-echo -e "PANEL URL:    ${YELLOW}${AUTO_URL}${NC}"
-echo -e "LOGIN:        ${GREEN}admin@javix.com${NC} / ${GREEN}javix123${NC}"
+echo -e "${YELLOW}--- ACTION REQUIRED: CREATE YOUR NODE ---${NC}"
+echo "1. Open the Panel (Check CodeSandbox 'PORTS' tab -> Port 80)."
+echo "2. Go to Admin -> Locations -> Create New (Name it 'Home')."
+echo "3. Go to Admin -> Nodes -> Create New."
 echo ""
-echo -e "${YELLOW}--- ACTION REQUIRED ---${NC}"
-echo "1. Login to your Panel (${AUTO_URL})"
-echo "2. Go to Admin -> Nodes -> Create New"
-echo -e "3. In 'FQDN' box, paste this: ${CYAN}${CLEAN_FQDN}${NC}"
-echo "4. Click Create -> Click Configuration -> Copy the Command."
+echo -e "${CYAN}--- COPY THESE EXACT VALUES INTO THE FORM ---${NC}"
+echo -e "Name:                  ${GREEN}Javix-Node${NC}"
+echo -e "Location:              ${GREEN}Home${NC}"
+echo -e "FQDN:                  ${GREEN}localhost${NC}   <-- IMPORTANT!"
+echo -e "Communicate Over SSL:  ${GREEN}Use HTTP Connection${NC} (Select the Right Option)"
+echo -e "Behind Proxy:          ${GREEN}Not Behind Proxy${NC}"
+echo -e "Total Memory:          ${GREEN}4096${NC}"
+echo -e "Total Disk:            ${GREEN}10000${NC}"
+echo -e "Daemon Port:           ${GREEN}8080${NC}"
+echo -e "Daemon SFTP Port:      ${GREEN}2022${NC}"
+echo -e "${CYAN}---------------------------------------------${NC}"
 echo ""
-echo -e "${CYAN}[INPUT] Paste the 'wings configure' command below and press ENTER:${NC}"
-read WINGS_CMD
+echo "4. Click 'Create Node'."
+echo "5. Click the 'Configuration' tab."
+echo ""
 
-# --- 7. AUTO-EXECUTE & FINISH ---
-echo -e "${YELLOW}Configuring Wings...${NC}"
-eval "$WINGS_CMD"
+# WIZARD INPUTS
+echo -e "${YELLOW}--- NOW PASTE THE INFO HERE ---${NC}"
 
-echo -e "${YELLOW}Starting Wings in background...${NC}"
-# Start Wings in background, detached so it doesn't die when script ends
+# 1. Ask for Panel URL
+echo -e "${CYAN}1. Enter your Panel URL (Copy from browser address bar):${NC}"
+read -r INPUT_URL
+
+# 2. Ask for Token
+echo -e "${CYAN}2. Enter the Token (The long text starting with 'ptla_'):${NC}"
+read -r INPUT_TOKEN
+
+# 3. Ask for UUID 
+echo -e "${CYAN}3. Enter the Node UUID (e.g. 848d7s...):${NC}"
+read -r INPUT_UUID
+
+echo ""
+echo -e "${YELLOW}Applying Configuration...${NC}"
+
+# Manually run the configure command using the inputs
+wings configure --panel-url "$INPUT_URL" --token "$INPUT_TOKEN" --node "$INPUT_UUID" --allow-cors-origins "*" 
+
+# --- 7. START WINGS & SHOW FINAL SCREEN ---
+echo -e "${YELLOW}Starting Wings...${NC}"
 wings --debug > wings.log 2>&1 &
 
-# CLEAR AND SHOW FINAL LOGO
 sleep 3
-logo
-echo -e "   ${GREEN}SUCCESS! JAVIX PANEL & WINGS ARE ONLINE.${NC}"
-echo -e "   ${CYAN}You can now close this terminal window.${NC}"
+clear
+echo -e "${CYAN}"
+echo "       ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
+echo "       ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
+echo "       ██║███████║██║   ██║██║ ╚███╔╝ "
+echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
+echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
+echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
+echo -e "${GREEN}      :: SYSTEM ONLINE ::${NC}"
 echo ""
+echo -e "   Status: ${GREEN}WINGS RUNNING ON LOCALHOST${NC}"
+echo ""
+echo -e "   ${YELLOW}Note: If the node shows a red heart in the panel,${NC}"
+echo -e "   ${YELLOW}restart the CodeSandbox devbox once.${NC}"
