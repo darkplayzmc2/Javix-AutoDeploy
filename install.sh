@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX-AUTODEPLOY | CHEAT SHEET EDITION
-#  >> FEATURE: Tells you exactly what to type in the Create Node page.
+#  >> JAVIX-AUTODEPLOY | RECOVERY EDITION
+#  >> FEATURE: Robust error checking & Port 80 Forcing
 # ==============================================================================
 
 # --- 0. AUTO-ELEVATION ---
@@ -27,32 +27,41 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: CHEAT SHEET MODE ::${NC}"
+    echo -e "${GREEN}    :: RECOVERY MODE ::${NC}"
     echo ""
 }
 
-# --- 2. CLEANUP ---
+# --- 2. ENVIRONMENT CHECK ---
 logo
-echo -e "${CYAN}[JAVIX]${NC} Cleaning up old files..."
+echo -e "${YELLOW}[JAVIX] Checking Linux Environment...${NC}"
+
+# Fix /dev/null issues if present
+if [ ! -e /dev/null ]; then
+    mknod /dev/null c 1 3
+    chmod 666 /dev/null
+fi
+
+# Install BASIC tools if missing (The ones you saw failing)
+apt-get update
+apt-get install -y curl tar unzip git jq certbot mariadb-server mariadb-client coreutils sed
+
+echo -e "${GREEN}[JAVIX] Environment Fixed.${NC}"
+
+# --- 3. CLEANUP ---
+echo -e "${CYAN}[JAVIX] Cleaning up old files...${NC}"
 rm -rf /var/www/pterodactyl /etc/pterodactyl /usr/local/bin/wings
-docker rm -f $(docker ps -a -q) >/dev/null 2>&1
+docker rm -f $(docker ps -a -q) 2>/dev/null
 echo -e "${GREEN}[DONE]${NC}"
 
-# --- 3. INSTALL DEPENDENCIES ---
-echo -e "${CYAN}[JAVIX]${NC} Installing System Requirements..."
-apt-get update -q >/dev/null 2>&1
-apt-get install -y curl tar unzip git jq certbot mariadb-server mariadb-client >/dev/null 2>&1
-apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip} >/dev/null 2>&1
+# --- 4. INSTALL PANEL (PORT 80) ---
+echo -e "${CYAN}[JAVIX] Setting up Panel on Port 80...${NC}"
 
 # Install Docker
 if ! command -v docker &> /dev/null; then
-    curl -sSL https://get.docker.com/ | CHANNEL=stable bash >/dev/null 2>&1
+    curl -sSL https://get.docker.com/ | CHANNEL=stable bash
 fi
-systemctl enable --now docker >/dev/null 2>&1
-systemctl enable --now mariadb >/dev/null 2>&1
-
-# --- 4. INSTALL PANEL (PORT 80) ---
-echo -e "${CYAN}[JAVIX]${NC} Setting up Panel on Port 80..."
+systemctl enable --now docker
+systemctl enable --now mariadb
 
 # Setup Database
 mysql -u root -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY 'javix123';"
@@ -63,34 +72,38 @@ mysql -u root -e "FLUSH PRIVILEGES;"
 # Setup Files
 mkdir -p /var/www/pterodactyl
 cd /var/www/pterodactyl
-curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz >/dev/null 2>&1
-tar -xzvf panel.tar.gz >/dev/null 2>&1
+curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
+tar -xzvf panel.tar.gz
 chmod -R 755 storage bootstrap/cache
 
-# Install Composer
-curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+# Install PHP & Composer
+apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip}
+curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
 cp .env.example .env
-composer install --no-dev --optimize-autoloader --no-interaction >/dev/null 2>&1
-php artisan key:generate --force >/dev/null 2>&1
+composer install --no-dev --optimize-autoloader --no-interaction
+php artisan key:generate --force
 
 # --- CONFIGURATION FOR CODESANDBOX ---
 sed -i 's/DB_PASSWORD=/DB_PASSWORD=javix123/g' .env
 sed -i "s|APP_URL=http://localhost|APP_URL=http://localhost|g" .env
 sed -i "s|APP_URL=https://panel.example.com|APP_URL=http://localhost|g" .env
 
-php artisan migrate --seed --force >/dev/null 2>&1
-php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
+php artisan migrate --seed --force
+php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
 
-# Serve the panel on Port 80
+# Serve the panel on Port 80 (Explicitly Binding)
+# We kill any old process on port 80 first
+fuser -k 80/tcp 2>/dev/null
 nohup php artisan serve --host=0.0.0.0 --port=80 > panel.log 2>&1 &
 
 # --- 5. INSTALL WINGS ---
-echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
+echo -e "${CYAN}[JAVIX] Installing Wings...${NC}"
 mkdir -p /etc/pterodactyl
-curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
+curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
 chmod u+x /usr/local/bin/wings
 
-# --- 6. THE CHEAT SHEET & WIZARD ---
+# --- 6. THE CHEAT SHEET ---
 logo
 echo -e "${GREEN}PANEL INSTALLED!${NC}"
 echo -e "Login: ${CYAN}admin@javix.com${NC} / ${CYAN}javix123${NC}"
@@ -104,7 +117,7 @@ echo -e "${CYAN}--- COPY THESE EXACT VALUES INTO THE FORM ---${NC}"
 echo -e "Name:                  ${GREEN}Javix-Node${NC}"
 echo -e "Location:              ${GREEN}Home${NC}"
 echo -e "FQDN:                  ${GREEN}localhost${NC}   <-- IMPORTANT!"
-echo -e "Communicate Over SSL:  ${GREEN}Use HTTP Connection${NC} (Select the Right Option)"
+echo -e "Communicate Over SSL:  ${GREEN}Use HTTP Connection${NC}"
 echo -e "Behind Proxy:          ${GREEN}Not Behind Proxy${NC}"
 echo -e "Total Memory:          ${GREEN}4096${NC}"
 echo -e "Total Disk:            ${GREEN}10000${NC}"
@@ -153,6 +166,4 @@ echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚�
 echo -e "${GREEN}      :: SYSTEM ONLINE ::${NC}"
 echo ""
 echo -e "   Status: ${GREEN}WINGS RUNNING ON LOCALHOST${NC}"
-echo ""
-echo -e "   ${YELLOW}Note: If the node shows a red heart in the panel,${NC}"
-echo -e "   ${YELLOW}restart the CodeSandbox devbox once.${NC}"
+echo -e "   Note:   If you see a Red Heart, restart this Devbox."
