@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX INTERACTIVE ROOT EDITION
-#  >> FEATURES: Runs as ROOT (Fixes Permissions), Asks for Admin Details
+#  >> JAVIX DEPENDENCY FIX EDITION
+#  >> FIXES: "mysql: not found" error by installing missing tools
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,19 +11,22 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. CLEANUP (Wipe broken data)
-echo "Wiping broken installation..."
+# 2. GENERATE UNIQUE ID (Fixes Permission/Corrupt Data)
+RUN_ID="run_$(date +%s)"
+
+# 3. CLEANUP
+echo "Wiping broken data..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
 
-# Fix missing tools
+# Fix host tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
     apt-get install -y curl git
 fi
 
-# 3. VISUALS
+# 4. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -38,11 +41,11 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: INTERACTIVE ROOT EDITION ::${NC}"
+    echo -e "${GREEN}    :: DEPENDENCY FIX EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. MENU SYSTEM ---
+# --- 5. MENU ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
@@ -57,7 +60,7 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- 5. CONFIGURATION ---
+# --- 6. CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
 mkdir -p /etc/javix
 cd /etc/javix
@@ -69,18 +72,16 @@ if [ "$ENV_TYPE" == "1" ]; then
     APP_URL="https://${FQDN}"
 fi
 
-# --- DOCKER COMPOSE (ROOT MODE) ---
-# We use 'user: root' to bypass ALL permission errors.
-
+# --- DOCKER COMPOSE ---
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
   database:
     image: mariadb:10.5
     restart: always
-    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=256K
     volumes:
-      - javix_db:/var/lib/mysql
+      - javix_db_$RUN_ID:/var/lib/mysql
     environment:
       - MYSQL_ROOT_PASSWORD=javix_root
       - MYSQL_DATABASE=panel
@@ -94,7 +95,7 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root  # <--- THIS FIXES THE PERMISSION DENIED ERROR
+    user: root  # Fixes Permission Denied
     ports:
       - "3000:80"
     environment:
@@ -118,30 +119,39 @@ services:
       - database
       - cache
     volumes:
-      - javix_var:/app/var/
-      - javix_logs:/app/storage/logs
-      - javix_public:/app/storage/app/public
+      - javix_var_$RUN_ID:/app/var/
+      - javix_logs_$RUN_ID:/app/storage/logs
+      - javix_public_$RUN_ID:/app/storage/app/public
 
 volumes:
-  javix_db:
-  javix_var:
-  javix_logs:
-  javix_public:
+  javix_db_$RUN_ID:
+  javix_var_$RUN_ID:
+  javix_logs_$RUN_ID:
+  javix_public_$RUN_ID:
 EOF
 
-# --- 6. START UP ---
+# --- 7. START UP ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
+echo -e "${YELLOW}Waiting for Boot (15s)...${NC}"
 sleep 15
 
-# --- 7. DATABASE REPAIR (CRITICAL FIX) ---
-echo -e "${CYAN}[JAVIX]${NC} Repairing Database..."
-# This creates the missing 'settings' table that caused your error
+# --- 8. THE MISSING LINK FIX ---
+logo
+echo -e "${YELLOW}====================================================${NC}"
+echo -e "${RED}      CRITICAL FIX: INSTALLING MYSQL CLIENT      ${NC}"
+echo -e "${YELLOW}====================================================${NC}"
+echo "Installing dependencies inside the container..."
+
+# THIS IS THE FIX FOR YOUR 'mysql not found' ERROR
+docker compose exec panel apk update
+docker compose exec panel apk add --no-cache mysql-client mariadb-connector-c-dev
+
+echo -e "${GREEN}Dependencies Installed. Running Migration...${NC}"
 docker compose exec panel php artisan migrate --seed --force
 
-# --- 8. FIX URL ---
+# --- 9. FIX URL ---
 if [ "$ENV_TYPE" == "2" ]; then
     logo
     echo -e "${YELLOW}====================================================${NC}"
@@ -162,7 +172,7 @@ if [ "$ENV_TYPE" == "2" ]; then
     sleep 5
 fi
 
-# --- 9. INTERACTIVE USER CREATION ---
+# --- 10. INTERACTIVE USER CREATION ---
 logo
 echo -e "${YELLOW}--- CREATE ADMIN USER ---${NC}"
 echo -n "Enter Email: "
@@ -179,13 +189,13 @@ read ADMIN_PASS
 echo -e "${CYAN}[JAVIX]${NC} Creating User..."
 docker compose exec panel php artisan p:user:make --email="$ADMIN_EMAIL" --username="$ADMIN_USER" --name="$ADMIN_FIRST" --name-last="$ADMIN_LAST" --password="$ADMIN_PASS" --admin=1
 
-# --- 10. WINGS ---
+# --- 11. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 11. DONE ---
+# --- 12. DONE ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
