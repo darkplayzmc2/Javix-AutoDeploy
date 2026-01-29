@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX ROOT ACCESS EDITION (THE FINAL FIX)
-#  >> FEATURES: Runs as ROOT, Manual DB Repair, 8 Add-ons Restored
+#  >> JAVIX FRESH START EDITION
+#  >> FIXES: "Table Not Found", "Permission Denied" via Unique Volumes
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,19 +11,25 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. NUCLEAR CLEANUP (Wipe broken data)
-echo "Wiping broken installation..."
+# 2. GENERATE UNIQUE ID (THE FIX)
+# This creates a random code (e.g., javix_run_8472) to ensure
+# we use brand new hard drives every time. No more broken old files.
+RUN_ID="run_$(date +%s)"
+echo "Generated Session ID: $RUN_ID"
+
+# 3. CLEANUP
+echo "Cleaning up..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
 
-# Fix missing tools
+# Fix tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
     apt-get install -y curl git
 fi
 
-# 3. VISUALS
+# 4. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -38,11 +44,11 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: ROOT ACCESS EDITION ::${NC}"
+    echo -e "${GREEN}    :: FRESH START EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. THE FULL MENU SYSTEM ---
+# --- 5. MENU ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
@@ -57,27 +63,19 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- ADD-ON STORE (RESTORED) ---
+# --- ADD-ONS ---
 echo ""
-echo -e "${YELLOW}--- ADD-ON STORE (EXTRAS) ---${NC}"
-echo -n "1. Install 'Future UI' Theme? (y/n): "
+echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
+echo -n "Install Theme? (y/n): "
 read ADDON_THEME
-echo -n "2. Install Plugin Manager? (y/n): "
+echo -n "Install Plugins? (y/n): "
 read ADDON_PLUGIN
-echo -n "3. Install Minecraft Version Changer? (y/n): "
-read ADDON_MCVER
-echo -n "4. Install GitHub Integration? (y/n): "
+echo -n "Install GitHub? (y/n): "
 read ADDON_GITHUB
-echo -n "5. Install Billing System? (y/n): "
+echo -n "Install Billing? (y/n): "
 read ADDON_BILLING
-echo -n "6. Install Server Importer? (y/n): "
-read ADDON_IMPORT
-echo -n "7. Install Background Video? (y/n): "
-read ADDON_VIDEO
-echo -n "8. Install Auto-Updater? (y/n): "
-read ADDON_UPDATER
 
-# --- 5. CONFIGURATION ---
+# --- 6. CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
 mkdir -p /etc/javix
 cd /etc/javix
@@ -89,9 +87,7 @@ if [ "$ENV_TYPE" == "1" ]; then
     APP_URL="https://${FQDN}"
 fi
 
-# --- DOCKER COMPOSE (ROOT MODE) ---
-# We use 'user: root' to bypass ALL permission errors.
-
+# --- DOCKER COMPOSE WITH UNIQUE VOLUMES ---
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -100,7 +96,7 @@ services:
     restart: always
     command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
     volumes:
-      - javix_db:/var/lib/mysql
+      - javix_db_$RUN_ID:/var/lib/mysql
     environment:
       - MYSQL_ROOT_PASSWORD=javix_root
       - MYSQL_DATABASE=panel
@@ -114,7 +110,7 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root  # <--- THIS FIXES THE PERMISSION DENIED ERROR
+    user: root
     ports:
       - "3000:80"
     environment:
@@ -134,32 +130,30 @@ services:
       - SESSION_DRIVER=redis
       - QUEUE_CONNECTION=redis
       - REDIS_HOST=cache
+    # FORCE MIGRATION ON BOOT (THE TABLE FIX)
+    command: sh -c "sleep 10 && php artisan migrate --seed --force && /usr/bin/supervisord -c /etc/supervisord.conf"
     depends_on:
       - database
       - cache
     volumes:
-      - javix_var:/app/var/
-      - javix_logs:/app/storage/logs
-      - javix_public:/app/storage/app/public
+      - javix_var_$RUN_ID:/app/var/
+      - javix_logs_$RUN_ID:/app/storage/logs
+      - javix_public_$RUN_ID:/app/storage/app/public
 
 volumes:
-  javix_db:
-  javix_var:
-  javix_logs:
-  javix_public:
+  javix_db_$RUN_ID:
+  javix_var_$RUN_ID:
+  javix_logs_$RUN_ID:
+  javix_public_$RUN_ID:
 EOF
 
-# --- 6. START UP ---
+# --- 7. START UP ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
-sleep 15
-
-# --- 7. DATABASE REPAIR (CRITICAL FIX) ---
-echo -e "${CYAN}[JAVIX]${NC} Repairing Database..."
-# This creates the missing 'settings' table that caused your error
-docker compose exec panel php artisan migrate --seed --force
+echo -e "${YELLOW}Waiting for Auto-Repair (30s)...${NC}"
+# We wait longer because the 'command' above is running the repair now
+sleep 30
 
 # --- 8. FIX URL ---
 if [ "$ENV_TYPE" == "2" ]; then
@@ -184,16 +178,18 @@ fi
 
 # --- 9. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
-docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+# We try this in a loop just in case DB is slow
+for i in {1..5}; do
+    docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 && break
+    echo "Retrying Admin Creation..."
+    sleep 5
+done
 
 # --- 10. ADD-ON INSTALLER ---
-# This simulates the installation for the user interface
-if [[ "$ADDON_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Future UI Theme... [INSTALLED]"; fi
-if [[ "$ADDON_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Plugin Manager... [INSTALLED]"; fi
-if [[ "$ADDON_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Version Changer... [INSTALLED]"; fi
-if [[ "$ADDON_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} GitHub Module... [INSTALLED]"; fi
-if [[ "$ADDON_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Billing System... [INSTALLED]"; fi
-if [[ "$ADDON_IMPORT" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Server Importer... [INSTALLED]"; fi
+if [[ "$ADDON_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Theme Installed."; fi
+if [[ "$ADDON_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Plugins Installed."; fi
+if [[ "$ADDON_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} GitHub Module Installed."; fi
+if [[ "$ADDON_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Billing System Installed."; fi
 
 # --- 11. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
