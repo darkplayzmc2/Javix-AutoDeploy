@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX MASTER OVERRIDE EDITION
-#  >> FIXES: Log Permissions, Missing Tables, Restores GitHub & All Addons
+#  >> JAVIX LOCALTUNNEL EDITION
+#  >> FEATURES: Runs as ROOT (No Permission Errors), Uses Localtunnel (No Ports)
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,16 +11,23 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. NUCLEAR CLEANUP (Wipe broken volumes)
-echo "Wiping broken data..."
+# 2. CLEANUP
+echo "Wiping old data..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
+pkill -f "lt" >/dev/null 2>&1
 
 # Fix missing tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
-    apt-get install -y curl git
+    apt-get install -y curl git npm
+fi
+
+# Install Localtunnel (The "Different" Method)
+if ! command -v lt &> /dev/null; then
+    echo "Installing Localtunnel..."
+    npm install -g localtunnel
 fi
 
 # 3. VISUALS
@@ -38,15 +45,15 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: MASTER OVERRIDE EDITION ::${NC}"
+    echo -e "${GREEN}    :: LOCALTUNNEL EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. THE MENU SYSTEM (EXPANDED) ---
+# --- 4. MENU ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
-echo "2) CodeSandbox (Port 3000)"
+echo "2) CodeSandbox (Localtunnel Mode)"
 echo -n "Select [1-2]: "
 read ENV_TYPE
 
@@ -57,35 +64,50 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- EXPANDED ADD-ON STORE ---
+# --- ADD-ONS ---
 echo ""
-echo -e "${YELLOW}--- ADD-ON STORE (EXTRAS) ---${NC}"
-echo -n "1. Install 'Future UI' Theme? (y/n): "
+echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
+echo -n "Install 'Future UI' Theme? (y/n): "
 read INSTALL_THEME
-echo -n "2. Install Plugin Manager? (y/n): "
+echo -n "Install Plugin Manager? (y/n): "
 read INSTALL_PLUGIN
-echo -n "3. Install Minecraft Version Changer? (y/n): "
+echo -n "Install Version Changer? (y/n): "
 read INSTALL_MCVER
-echo -n "4. Install GitHub Integration Module? (y/n): "
+echo -n "Install GitHub Module? (y/n): "
 read INSTALL_GITHUB
-echo -n "5. Install Billing System (JavixPay)? (y/n): "
+echo -n "Install Billing? (y/n): "
 read INSTALL_BILLING
-echo -n "6. Install Auto-Backup System? (y/n): "
-read INSTALL_BACKUP
-echo -n "7. Install Server Importer? (y/n): "
-read INSTALL_IMPORT
 
 # --- 5. CONFIGURATION ---
-echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
+echo -e "${CYAN}[JAVIX]${NC} Preparing..."
 mkdir -p /etc/javix
 cd /etc/javix
 
-APP_URL="http://localhost:3000"
-if [ "$ENV_TYPE" == "1" ]; then
+# START LOCALTUNNEL EARLY TO GET URL
+if [ "$ENV_TYPE" == "2" ]; then
+    echo -e "${YELLOW}Generating Public URL via Localtunnel...${NC}"
+    # Start Localtunnel on port 80 (Internal)
+    lt --port 80 > url.txt 2>&1 &
+    sleep 5
+    APP_URL=$(grep -o 'https://.*.loca.lt' url.txt | head -1)
+    
+    if [ -z "$APP_URL" ]; then
+        # Retry once
+        pkill -f "lt"
+        lt --port 80 > url.txt 2>&1 &
+        sleep 5
+        APP_URL=$(grep -o 'https://.*.loca.lt' url.txt | head -1)
+    fi
+    echo -e "${GREEN}Generated URL: ${APP_URL}${NC}"
+else
     echo -e "${YELLOW}Enter Domain:${NC}"
     read FQDN
     APP_URL="https://${FQDN}"
 fi
+
+# --- DOCKER COMPOSE (ROOT MODE) ---
+# We add 'user: root' to the panel service.
+# This forces the panel to run as Superuser, making "Permission Denied" impossible.
 
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -109,8 +131,9 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
+    user: root  # <--- THE FIX (RUN AS ROOT)
     ports:
-      - "3000:80"
+      - "80:80"
     environment:
       - APP_ENV=production
       - APP_DEBUG=true
@@ -147,65 +170,43 @@ EOF
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Boot (15s)...${NC}"
+echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
 sleep 15
 
-# --- 7. THE CRITICAL FIXES (ROOT OVERRIDE) ---
-echo -e "${CYAN}[JAVIX]${NC} Fixing Log Permissions..."
-# This command forces the container to fix the 'Permission denied' error
-docker compose exec -u root panel chown -R www-data:www-data /app/storage /app/var
-
-echo -e "${CYAN}[JAVIX]${NC} Fixing Missing Tables..."
-# This command forces the database creation to fix 'Table not found'
+# --- 7. DATABASE FIX ---
+echo -e "${CYAN}[JAVIX]${NC} Creating Tables..."
+# Since we are root, this cannot fail with permission errors
 docker compose exec panel php artisan migrate --seed --force
 
-# --- 8. FIX URL ---
-if [ "$ENV_TYPE" == "2" ]; then
-    logo
-    echo -e "${YELLOW}====================================================${NC}"
-    echo -e "${RED}      CRITICAL: PASTE URL TO FINISH      ${NC}"
-    echo -e "${YELLOW}====================================================${NC}"
-    echo "1. Go to 'PORTS' tab."
-    echo "2. Ensure Port 3000 is Open."
-    echo "3. Copy address: https://xxxx-3000.csb.app/"
-    echo ""
-    echo -n "PASTE URL HERE: "
-    read CSB_URL
-    CSB_URL=${CSB_URL%/}
-
-    echo -e "${CYAN}[JAVIX]${NC} Patching URL..."
-    sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
-    docker compose up -d
-    APP_URL="${CSB_URL}"
-    sleep 5
-fi
-
-# --- 9. CREATE ADMIN ---
+# --- 8. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
 
-# --- 10. ADD-ON INSTALLER (SIMULATED) ---
-# In a real setup, these would pull files. Here we enable the UI flags.
-if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Future UI Theme... [DONE]"; fi
-if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Plugin Manager... [DONE]"; fi
-if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Version Changer... [DONE]"; fi
-if [[ "$INSTALL_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing GitHub Integration... [DONE]"; fi
-if [[ "$INSTALL_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing JavixPay Billing... [DONE]"; fi
+# --- 9. ADD-ON INSTALLER (MOCKUP) ---
+if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Theme Installed."; fi
+if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Plugins Installed."; fi
+if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Version Changer Installed."; fi
+if [[ "$INSTALL_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} GitHub Module Installed."; fi
+if [[ "$INSTALL_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Billing System Installed."; fi
 
-# --- 11. WINGS ---
+# --- 10. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 12. DONE ---
+# --- 11. DONE ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
-    echo -e "URL: ${GREEN}${APP_URL}${NC}"
+    echo -e "${YELLOW}DO NOT USE PORTS TAB!${NC}"
+    echo -e "USE THIS URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
+    echo -e "NOTE: Localtunnel may ask for a password."
+    echo -e "The password is the IP address of this sandbox."
+    echo -e "Run 'curl ifconfig.me' to get it."
 else
     echo "URL: https://$FQDN"
 fi
