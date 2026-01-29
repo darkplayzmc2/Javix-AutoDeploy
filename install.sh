@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX FRESH START EDITION
-#  >> FIXES: "Table Not Found", "Permission Denied" via Unique Volumes
+#  >> JAVIX BLUEPRINT / CLEAN EDITION
+#  >> FEATURES: No Themes, No Addons, Just a working Panel.
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,18 +11,16 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. GENERATE UNIQUE ID (THE FIX)
-# This creates a random code (e.g., javix_run_8472) to ensure
-# we use brand new hard drives every time. No more broken old files.
+# 2. GENERATE UNIQUE ID (Crucial for fixing permissions)
 RUN_ID="run_$(date +%s)"
-echo "Generated Session ID: $RUN_ID"
+echo "Starting Clean Install (Session: $RUN_ID)..."
 
 # 3. CLEANUP
-echo "Cleaning up..."
+echo "Wiping old data..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
 
-# Fix tools
+# Fix missing tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
@@ -44,7 +42,7 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: FRESH START EDITION ::${NC}"
+    echo -e "${GREEN}    :: BLUEPRINT / CLEAN EDITION ::${NC}"
     echo ""
 }
 
@@ -63,17 +61,7 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- ADD-ONS ---
-echo ""
-echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
-echo -n "Install Theme? (y/n): "
-read ADDON_THEME
-echo -n "Install Plugins? (y/n): "
-read ADDON_PLUGIN
-echo -n "Install GitHub? (y/n): "
-read ADDON_GITHUB
-echo -n "Install Billing? (y/n): "
-read ADDON_BILLING
+# (REMOVED ALL ADDON QUESTIONS - PURE INSTALL ONLY)
 
 # --- 6. CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
@@ -87,7 +75,7 @@ if [ "$ENV_TYPE" == "1" ]; then
     APP_URL="https://${FQDN}"
 fi
 
-# --- DOCKER COMPOSE WITH UNIQUE VOLUMES ---
+# --- DOCKER COMPOSE (ROOT + CLEAN) ---
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -110,7 +98,7 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root
+    user: root  # <--- Fixes Permission Denied
     ports:
       - "3000:80"
     environment:
@@ -130,7 +118,7 @@ services:
       - SESSION_DRIVER=redis
       - QUEUE_CONNECTION=redis
       - REDIS_HOST=cache
-    # FORCE MIGRATION ON BOOT (THE TABLE FIX)
+    # FORCE DATABASE CREATION ON BOOT
     command: sh -c "sleep 10 && php artisan migrate --seed --force && /usr/bin/supervisord -c /etc/supervisord.conf"
     depends_on:
       - database
@@ -151,8 +139,7 @@ EOF
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Auto-Repair (30s)...${NC}"
-# We wait longer because the 'command' above is running the repair now
+echo -e "${YELLOW}Waiting for Clean Install (30s)...${NC}"
 sleep 30
 
 # --- 8. FIX URL ---
@@ -178,26 +165,19 @@ fi
 
 # --- 9. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
-# We try this in a loop just in case DB is slow
 for i in {1..5}; do
     docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 && break
-    echo "Retrying Admin Creation..."
+    echo "Retrying..."
     sleep 5
 done
 
-# --- 10. ADD-ON INSTALLER ---
-if [[ "$ADDON_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Theme Installed."; fi
-if [[ "$ADDON_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Plugins Installed."; fi
-if [[ "$ADDON_GITHUB" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} GitHub Module Installed."; fi
-if [[ "$ADDON_BILLING" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Billing System Installed."; fi
-
-# --- 11. WINGS ---
+# --- 10. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 12. DONE ---
+# --- 11. DONE ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
@@ -205,6 +185,7 @@ echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
     echo -e "URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
+    echo -e "Theme: ${GREEN}Default (Blue/Clean)${NC}"
 else
     echo "URL: https://$FQDN"
 fi
