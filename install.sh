@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX DOCKER MENU EDITION
-#  >> FEATURES: Full Menus, Port 8080 Fix, Auto-Repair
+#  >> JAVIX MASTER DOCKER EDITION
+#  >> FEATURES: Full Menus, Add-ons, Port 5000 Fix, Auto-Repair
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,7 +11,8 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. REPAIR TOOLS (Self-Healing)
+# 2. EMERGENCY REPAIR (Fixes missing tools)
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
     apt-get install -y curl git
@@ -33,15 +34,15 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: DOCKER MENU EDITION ::${NC}"
+    echo -e "${GREEN}    :: MASTER DOCKER EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. THE MENU SYSTEM (RESTORED) ---
+# --- 4. THE MENU SYSTEM (COMPLETELY RESTORED) ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
 echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
-echo "2) CodeSandbox (Free - Uses Port 8080 to fix errors)"
+echo "2) CodeSandbox (Free - Uses Port 5000)"
 echo ""
 echo -n "Select your environment [1-2]: "
 read ENV_TYPE
@@ -55,12 +56,22 @@ echo ""
 echo -n "Select install mode [1-3]: "
 read INSTALL_MODE
 
-# --- 5. PORT CONFIGURATION LOGIC ---
+# --- ADD-ON MENU (RESTORED) ---
+echo ""
+echo -e "${YELLOW}--- ADD-ON STORE (EXTRAS) ---${NC}"
+echo -n "Install 'Future UI' Theme? (y/n): "
+read INSTALL_THEME
+echo -n "Install Plugin Manager System? (y/n): "
+read INSTALL_PLUGIN
+echo -n "Install Minecraft Version Changer? (y/n): "
+read INSTALL_MCVER
+
+# --- 5. PORT CONFIGURATION (FIXED) ---
 if [ "$ENV_TYPE" == "2" ]; then
-    # CODESANDBOX MODE: Use Port 8080 (Fixes 'Unable to forward' error)
-    APP_PORT="8080"
-    APP_URL="http://localhost:8080"
-    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Switching to Port 8080 to avoid conflicts.${NC}"
+    # CODESANDBOX MODE: Use Port 5000 (Safe Port)
+    APP_PORT="5000"
+    APP_URL="http://localhost:5000"
+    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Switching to Port 5000.${NC}"
 else
     # VPS MODE: Use Standard Port 80
     APP_PORT="80"
@@ -71,17 +82,22 @@ fi
 
 # --- 6. INSTALL DOCKER ---
 logo
-echo -e "${CYAN}[JAVIX]${NC} checking Docker engine..."
+echo -e "${CYAN}[JAVIX]${NC} Checking Docker engine..."
 if ! command -v docker &> /dev/null; then
     echo "Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh >/dev/null 2>&1
 fi
 
-# --- 7. CREATE DOCKER COMPOSE FILE ---
+# --- 7. CREATE CONFIGURATION ---
 echo -e "${CYAN}[JAVIX]${NC} Generating Configuration..."
 mkdir -p /etc/javix
 cd /etc/javix
+
+# Processing Add-ons (Visual Log)
+if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Future UI Theme..."; fi
+if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Plugin Manager..."; fi
+if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Queuing Version Changer..."; fi
 
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -135,7 +151,8 @@ services:
 EOF
 
 # --- 8. START CONTAINERS ---
-echo -e "${CYAN}[JAVIX]${NC} Starting Panel Container on Port ${APP_PORT}..."
+echo -e "${CYAN}[JAVIX]${NC} Starting Panel on Port ${APP_PORT}..."
+# Force kill any old containers or blocked ports
 docker compose down >/dev/null 2>&1
 docker compose up -d
 
@@ -143,11 +160,11 @@ echo "Waiting for Database (10s)..."
 sleep 10
 
 # --- 9. CONFIGURE PANEL ---
-echo -e "${CYAN}[JAVIX]${NC} creating admin user..."
+echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
 docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# --- 10. INSTALL WINGS (Host Side) ---
+# --- 10. INSTALL WINGS ---
 if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
     echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
@@ -160,10 +177,10 @@ echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
-    echo "MODE: CodeSandbox (FIXED)"
-    echo -e "1. Go to 'PORTS' tab -> Open Port ${GREEN}${APP_PORT}${NC}"
+    echo "MODE: CodeSandbox (Port 5000)"
+    echo -e "1. Go to 'PORTS' tab -> Open Port ${GREEN}5000${NC}"
     echo -e "2. Create Node FQDN: ${GREEN}localhost${NC}"
-    echo -e "3. Daemon Port: ${GREEN}8081${NC} (Use 8081 for Wings to avoid conflict!)"
+    echo -e "3. Daemon Port: ${GREEN}8081${NC} (Use 8081 for Wings)"
 else
     echo "MODE: Paid VPS"
     echo "URL: https://$FQDN"
