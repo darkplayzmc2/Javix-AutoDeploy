@@ -1,59 +1,88 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX REPAIR & DOCKER INSTALLER
-#  >> AUTOMATICALLY FIXES MISSING COMMANDS & INSTALLS PANEL
+#  >> JAVIX DOCKER MENU EDITION
+#  >> FEATURES: Full Menus, Port 8080 Fix, Auto-Repair
 # ==============================================================================
 
-# 1. EMERGENCY REPAIR (Fixes 'command not found' errors)
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-if [ ! -c /dev/null ]; then
-    rm -f /dev/null
-    mknod -m 666 /dev/null c 1 3
-fi
-
-# Force install basic tools if they are missing
-if ! command -v curl &> /dev/null; then
-    echo "Repairing System Tools..."
-    apt-get update -y
-    apt-get install -y curl sudo git
-fi
-
-# 2. AUTO-ELEVATION
+# 1. AUTO-ELEVATION
 if [ "$EUID" -ne 0 ]; then
   sudo "$0" "$@"
   exit
 fi
 
+# 2. REPAIR TOOLS (Self-Healing)
+if ! command -v curl &> /dev/null; then
+    apt-get update -y -q
+    apt-get install -y curl git
+fi
+
 # 3. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-clear
-echo -e "${CYAN}"
-echo "   ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
-echo "   ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
-echo "   ██║███████║██║   ██║██║ ╚███╔╝ "
-echo "   ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-echo -e "${GREEN}   :: DOCKER REPAIR EDITION ::${NC}"
-echo ""
+logo() {
+    clear
+    echo -e "${CYAN}"
+    echo "       ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
+    echo "       ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
+    echo "       ██║███████║██║   ██║██║ ╚███╔╝ "
+    echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
+    echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
+    echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
+    echo -e "${GREEN}    :: DOCKER MENU EDITION ::${NC}"
+    echo ""
+}
 
-# 4. INSTALL DOCKER (The Engine)
-echo "Installing Docker Engine..."
-if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
+# --- 4. THE MENU SYSTEM (RESTORED) ---
+logo
+echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
+echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
+echo "2) CodeSandbox (Free - Uses Port 8080 to fix errors)"
+echo ""
+echo -n "Select your environment [1-2]: "
+read ENV_TYPE
+
+echo ""
+echo -e "${YELLOW}--- COMPONENT SELECTION ---${NC}"
+echo "1) Full Stack (Panel + Wings)"
+echo "2) Wings Only"
+echo "3) Panel Only"
+echo ""
+echo -n "Select install mode [1-3]: "
+read INSTALL_MODE
+
+# --- 5. PORT CONFIGURATION LOGIC ---
+if [ "$ENV_TYPE" == "2" ]; then
+    # CODESANDBOX MODE: Use Port 8080 (Fixes 'Unable to forward' error)
+    APP_PORT="8080"
+    APP_URL="http://localhost:8080"
+    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Switching to Port 8080 to avoid conflicts.${NC}"
+else
+    # VPS MODE: Use Standard Port 80
+    APP_PORT="80"
+    echo -e "${YELLOW}Enter your Domain (FQDN):${NC}"
+    read FQDN
+    APP_URL="https://${FQDN}"
 fi
 
-# 5. SETUP WORKSPACE
-echo "Creating Javix Workspace..."
+# --- 6. INSTALL DOCKER ---
+logo
+echo -e "${CYAN}[JAVIX]${NC} checking Docker engine..."
+if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh >/dev/null 2>&1
+fi
+
+# --- 7. CREATE DOCKER COMPOSE FILE ---
+echo -e "${CYAN}[JAVIX]${NC} Generating Configuration..."
 mkdir -p /etc/javix
 cd /etc/javix
 
-# 6. CREATE DOCKER COMPOSE FILE (The Engine Room)
-# This creates the Panel, Database, and Cache containers automatically.
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -79,12 +108,12 @@ services:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
     ports:
-      - "80:80"
+      - "${APP_PORT}:80"
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
       - APP_THEME=pterodactyl
-      - APP_URL=http://localhost
+      - APP_URL=${APP_URL}
       - APP_TIMEZONE=UTC
       - APP_SERVICE_AUTHOR=admin@javix.com
       - DB_HOST=database
@@ -105,47 +134,55 @@ services:
       - "/var/www/javix/storage/app/public:/app/storage/app/public"
 EOF
 
-# 7. START EVERYTHING
-echo "Starting Containers..."
-# Remove old containers if they exist
+# --- 8. START CONTAINERS ---
+echo -e "${CYAN}[JAVIX]${NC} Starting Panel Container on Port ${APP_PORT}..."
 docker compose down >/dev/null 2>&1
-# Start new ones
 docker compose up -d
 
-echo "Waiting for Database to wake up (10s)..."
+echo "Waiting for Database (10s)..."
 sleep 10
 
-# 8. CONFIGURE PANEL (Inside the container)
-echo "Generating Admin User..."
-docker compose exec -T panel php artisan key:generate --force
-docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+# --- 9. CONFIGURE PANEL ---
+echo -e "${CYAN}[JAVIX]${NC} creating admin user..."
+docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
+docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# 9. INSTALL WINGS (On Host)
-echo "Installing Wings..."
-curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
-chmod u+x /usr/local/bin/wings
+# --- 10. INSTALL WINGS (Host Side) ---
+if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
+    echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
+    curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
+    chmod u+x /usr/local/bin/wings
+fi
 
-# 10. FINAL OUTPUT
-clear
+# --- 11. FINAL OUTPUT ---
+logo
 echo "=========================================="
-echo "      JAVIX INSTALL COMPLETE"
+echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
-echo "1. Go to CodeSandbox 'PORTS' tab -> Open Port 80."
-echo "2. Login: admin@javix.com / javix123"
+if [ "$ENV_TYPE" == "2" ]; then
+    echo "MODE: CodeSandbox (FIXED)"
+    echo -e "1. Go to 'PORTS' tab -> Open Port ${GREEN}${APP_PORT}${NC}"
+    echo -e "2. Create Node FQDN: ${GREEN}localhost${NC}"
+    echo -e "3. Daemon Port: ${GREEN}8081${NC} (Use 8081 for Wings to avoid conflict!)"
+else
+    echo "MODE: Paid VPS"
+    echo "URL: https://$FQDN"
+fi
 echo "=========================================="
-echo "3. Create Node FQDN: localhost"
-echo "4. Paste 'wings configure' command below:"
+echo "Login: admin@javix.com / javix123"
 echo "=========================================="
 echo ""
-echo -n "PASTE COMMAND: "
-read WINGS_CMD
 
-echo "Configuring Wings..."
-eval "$WINGS_CMD"
-
-# Patch config to allow Docker networking
-sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
-
-echo "Starting Wings..."
-wings --debug > wings.log 2>&1 &
-echo "SUCCESS. JAVIX IS ONLINE."
+if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
+    echo -e "${YELLOW}PASTE YOUR 'wings configure' COMMAND BELOW:${NC}"
+    read WINGS_CMD
+    echo "Configuring Wings..."
+    eval "$WINGS_CMD"
+    
+    # DOCKER NETWORK FIX
+    sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
+    
+    echo "Starting Wings..."
+    wings --debug > wings.log 2>&1 &
+    echo -e "${GREEN}SUCCESS! JAVIX IS ONLINE.${NC}"
+fi
