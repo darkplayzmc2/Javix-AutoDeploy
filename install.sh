@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX UNIVERSAL FIXER
-#  >> FEATURES: Fixes 'Invalid Request URL', Menus, Add-ons, Port 5000
+#  >> JAVIX FINAL FIX: PORT 3000 EDITION
+#  >> FEATURES: Uses Native Port 3000, Aggressive Cleanup, Fixes URL Errors
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,18 +11,25 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. EMERGENCY REPAIR
+# 2. EMERGENCY REPAIR & CLEANUP (The "Nuclear" Option)
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+echo "Killing zombie processes..."
+# Force kill ANYTHING running on these ports
+fuser -k 80/tcp >/dev/null 2>&1
+fuser -k 8080/tcp >/dev/null 2>&1
+fuser -k 5000/tcp >/dev/null 2>&1
+fuser -k 3000/tcp >/dev/null 2>&1
+
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
-    apt-get install -y curl git
+    apt-get install -y curl git psmisc
 fi
 
 # 3. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
 logo() {
@@ -34,7 +41,7 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: UNIVERSAL FIXER EDITION ::${NC}"
+    echo -e "${GREEN}    :: PORT 3000 EDITION ::${NC}"
     echo ""
 }
 
@@ -42,7 +49,7 @@ logo() {
 logo
 echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
 echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
-echo "2) CodeSandbox (Free - Fixes Invalid URL Error)"
+echo "2) CodeSandbox (Free - Uses Port 3000)"
 echo ""
 echo -n "Select your environment [1-2]: "
 read ENV_TYPE
@@ -56,7 +63,7 @@ echo ""
 echo -n "Select install mode [1-3]: "
 read INSTALL_MODE
 
-# --- ADD-ON MENU ---
+# --- ADD-ONS ---
 echo ""
 echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
 echo -n "Install 'Future UI' Theme? (y/n): "
@@ -68,10 +75,10 @@ read INSTALL_MCVER
 
 # --- 5. INITIAL CONFIGURATION ---
 if [ "$ENV_TYPE" == "2" ]; then
-    # CODESANDBOX: We start with a placeholder, then fix it later
-    APP_PORT="5000"
-    APP_URL="http://localhost:5000"
-    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Will ask for URL later to fix 'Invalid Request'.${NC}"
+    # CODESANDBOX: Port 3000 (Native)
+    APP_PORT="3000"
+    APP_URL="http://localhost:3000"
+    echo -e "${GREEN}[JAVIX] CodeSandbox detected. Using Native Port 3000.${NC}"
 else
     # VPS MODE
     APP_PORT="80"
@@ -84,7 +91,6 @@ fi
 logo
 echo -e "${CYAN}[JAVIX]${NC} Checking Docker engine..."
 if ! command -v docker &> /dev/null; then
-    echo "Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh >/dev/null 2>&1
 fi
@@ -159,28 +165,28 @@ echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
 docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# --- 10. CRITICAL FIX FOR CODESANDBOX ---
+# --- 10. FIX 'INVALID URL' (CRITICAL) ---
 if [ "$ENV_TYPE" == "2" ]; then
     logo
     echo -e "${YELLOW}====================================================${NC}"
     echo -e "${YELLOW}      CRITICAL STEP: FIX 'INVALID REQUEST URL'      ${NC}"
     echo -e "${YELLOW}====================================================${NC}"
     echo "1. Go to the 'PORTS' tab in CodeSandbox."
-    echo "2. Find Port 5000."
-    echo "3. Copy the 'Forwarded Address' (e.g., https://abc-5000.csb.app/)"
+    echo -e "2. Find Port ${GREEN}3000${NC}."
+    echo "3. Copy the 'Forwarded Address' (e.g., https://abc-3000.csb.app/)"
     echo ""
     echo -n "PASTE THE URL HERE: "
     read CSB_URL
     
-    # Remove trailing slash if present
+    # Remove trailing slash
     CSB_URL=${CSB_URL%/}
 
     echo -e "${CYAN}[JAVIX]${NC} Patching Panel with URL: ${CSB_URL}..."
     
-    # Update Docker Compose with correct URL
-    sed -i "s|APP_URL=http://localhost:5000|APP_URL=${CSB_URL}|g" docker-compose.yml
+    # Update Docker Compose
+    sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
     
-    # Restart to apply
+    # Restart
     docker compose down >/dev/null 2>&1
     docker compose up -d
     
@@ -200,9 +206,10 @@ echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
-    echo "MODE: CodeSandbox (FIXED)"
+    echo "MODE: CodeSandbox (Port 3000)"
     echo -e "PANEL URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
+    echo -e "Wings Port: ${GREEN}8081${NC} (Use 8081 for Daemon Port!)"
 else
     echo "MODE: Paid VPS"
     echo "URL: https://$FQDN"
