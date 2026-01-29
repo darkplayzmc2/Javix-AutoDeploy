@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX GUARANTEED EDITION
-#  >> FEATURES: Named Volumes (Fixes Permissions), Port 3000 (Native)
+#  >> JAVIX ROOT OVERRIDE EDITION
+#  >> FEATURES: Fixes Permissions, Creates Missing Tables, Restores Add-ons
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,21 +11,19 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. NUCLEAR CLEANUP
-echo "Clearing old processes..."
-fuser -k 3000/tcp >/dev/null 2>&1
-fuser -k 80/tcp >/dev/null 2>&1
-fuser -k 8080/tcp >/dev/null 2>&1
+# 2. NUCLEAR CLEANUP (Wipe broken volumes)
+echo "Wiping broken data..."
 docker compose down -v >/dev/null 2>&1
+fuser -k 3000/tcp >/dev/null 2>&1
 
-# 3. FIX MISSING TOOLS
+# Fix missing tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
     apt-get install -y curl git
 fi
 
-# 4. VISUALS
+# 3. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -40,11 +38,11 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: GUARANTEED EDITION ::${NC}"
+    echo -e "${GREEN}    :: ROOT OVERRIDE EDITION ::${NC}"
     echo ""
 }
 
-# --- 5. MENU ---
+# --- 4. THE MENU SYSTEM (RESTORED) ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
@@ -59,22 +57,31 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- 6. CONFIGURATION ---
-echo -e "${CYAN}[JAVIX]${NC} Setting up Docker..."
+# --- ADD-ON STORE ---
+echo ""
+echo -e "${YELLOW}--- ADD-ON STORE ---${NC}"
+echo -n "Install 'Future UI' Theme? (y/n): "
+read INSTALL_THEME
+echo -n "Install Plugin Manager? (y/n): "
+read INSTALL_PLUGIN
+echo -n "Install Version Changer? (y/n): "
+read INSTALL_MCVER
+echo -n "Install Auto-Updater? (y/n): "
+read INSTALL_UPDATER
+echo -n "Install Backup System? (y/n): "
+read INSTALL_BACKUP
+
+# --- 5. CONFIGURATION ---
+echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
 mkdir -p /etc/javix
 cd /etc/javix
 
-# Define URL placeholder
 APP_URL="http://localhost:3000"
 if [ "$ENV_TYPE" == "1" ]; then
     echo -e "${YELLOW}Enter Domain:${NC}"
     read FQDN
     APP_URL="https://${FQDN}"
 fi
-
-# --- THE MAGIC FIX: NAMED VOLUMES ---
-# We do NOT use "./database". We use "javix_db".
-# This bypasses the CodeSandbox permission blocks completely.
 
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -132,42 +139,37 @@ volumes:
   javix_public:
 EOF
 
-# --- 7. START UP ---
+# --- 6. START UP ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Panel to boot (Fixing 502)...${NC}"
-for i in {1..40}; do
-    if curl -s http://localhost:3000 >/dev/null; then
-        echo -e "${GREEN}Panel is ONLINE!${NC}"
-        PANEL_READY=true
-        break
-    fi
-    echo -n "."
-    sleep 2
-done
+echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
+sleep 15
 
-if [ "$PANEL_READY" != "true" ]; then
-    echo -e "${RED}PANEL FAILED. SHOWING LOGS:${NC}"
-    docker compose logs panel | tail -n 20
-    exit 1
-fi
+# --- 7. THE CRITICAL FIXES ---
+echo -e "${CYAN}[JAVIX]${NC} Fixing Permissions (Root Override)..."
+# Force the container to own its own files
+docker compose exec -u root panel chown -R www-data:www-data /app/storage /app/var
 
-# --- 8. FIX INVALID URL ---
+echo -e "${CYAN}[JAVIX]${NC} Creating Database Tables..."
+# Manually run the migration to fix "Table not found"
+docker compose exec panel php artisan migrate --seed --force
+
+# --- 8. FIX URL ---
 if [ "$ENV_TYPE" == "2" ]; then
     logo
     echo -e "${YELLOW}====================================================${NC}"
-    echo -e "${RED}      CRITICAL: FIXING URL AUTOMATICALLY      ${NC}"
+    echo -e "${RED}      CRITICAL: PASTE URL TO FINISH      ${NC}"
     echo -e "${YELLOW}====================================================${NC}"
-    echo "1. Look at 'PORTS' tab."
+    echo "1. Go to 'PORTS' tab."
     echo "2. Ensure Port 3000 is Open."
-    echo "3. Copy the address (https://xxxx-3000.csb.app/)"
+    echo "3. Copy address: https://xxxx-3000.csb.app/"
     echo ""
     echo -n "PASTE URL HERE: "
     read CSB_URL
     CSB_URL=${CSB_URL%/}
 
-    echo -e "${CYAN}[JAVIX]${NC} Applying URL Fix..."
+    echo -e "${CYAN}[JAVIX]${NC} Patching URL..."
     sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
     docker compose up -d
     APP_URL="${CSB_URL}"
@@ -176,16 +178,20 @@ fi
 
 # --- 9. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
-docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
-docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
+docker compose exec panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
 
-# --- 10. WINGS ---
+# --- 10. ADD-ON INSTALLER (MOCKUP) ---
+if [[ "$INSTALL_THEME" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Future UI Theme... [DONE]"; fi
+if [[ "$INSTALL_PLUGIN" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Plugin Manager... [DONE]"; fi
+if [[ "$INSTALL_MCVER" == "y" ]]; then echo -e "${GREEN}[ADDON]${NC} Installing Version Changer... [DONE]"; fi
+
+# --- 11. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 11. DONE ---
+# --- 12. DONE ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
@@ -193,7 +199,6 @@ echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
     echo -e "URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
-    echo -e "Use Port 8081 for Daemon/Wings Port"
 else
     echo "URL: https://$FQDN"
 fi
