@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX-AUTODEPLOY | RECOVERY EDITION
-#  >> FEATURE: Robust error checking & Port 80 Forcing
+#  >> JAVIX-AUTODEPLOY | ULTIMATE REPAIR EDITION
+#  >> FEATURES: Self-Healing, Menus, Multi-Environment Support
 # ==============================================================================
 
 # --- 0. AUTO-ELEVATION ---
@@ -11,7 +11,17 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# --- 1. VISUALS ---
+# --- 1. EMERGENCY SYSTEM REPAIR (FIXES YOUR ERRORS) ---
+echo "Initializing Javix System Repair..."
+
+# Fix broken /dev/null (The cause of your previous errors)
+if [ ! -e /dev/null ]; then mknod /dev/null c 1 3; chmod 666 /dev/null; fi
+
+# Reinstall missing tools silently
+apt-get update -y >/dev/null 2>&1
+apt-get install -y --reinstall coreutils curl tar unzip git jq certbot mariadb-server mariadb-client sed whiptail >/dev/null 2>&1
+
+# --- 2. VISUALS ---
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,143 +37,139 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: RECOVERY MODE ::${NC}"
+    echo -e "${GREEN}    :: ULTIMATE REPAIR EDITION ::${NC}"
     echo ""
 }
 
-# --- 2. ENVIRONMENT CHECK ---
+# --- 3. THE MENU SYSTEM ---
 logo
-echo -e "${YELLOW}[JAVIX] Checking Linux Environment...${NC}"
+echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
+echo "1) Paid VPS (DigitalOcean, AWS, Hetzner)"
+echo "2) CodeSandbox (Free - Forces Port 80)"
+echo "3) GitHub Codespaces (Free - Forces Tunnel)"
+echo ""
+echo -n "Select your environment [1-3]: "
+read ENV_TYPE
 
-# Fix /dev/null issues if present
-if [ ! -e /dev/null ]; then
-    mknod /dev/null c 1 3
-    chmod 666 /dev/null
-fi
+logo
+echo -e "${YELLOW}--- COMPONENT SELECTION ---${NC}"
+echo "1) Full Stack (Panel + Wings)"
+echo "2) Wings Only"
+echo "3) Panel Only"
+echo ""
+echo -n "Select install mode [1-3]: "
+read INSTALL_MODE
 
-# Install BASIC tools if missing (The ones you saw failing)
-apt-get update
-apt-get install -y curl tar unzip git jq certbot mariadb-server mariadb-client coreutils sed
-
-echo -e "${GREEN}[JAVIX] Environment Fixed.${NC}"
-
-# --- 3. CLEANUP ---
-echo -e "${CYAN}[JAVIX] Cleaning up old files...${NC}"
+# --- 4. PREPARATION & CLEANUP ---
+echo -e "${CYAN}[JAVIX]${NC} Cleaning up old installation..."
 rm -rf /var/www/pterodactyl /etc/pterodactyl /usr/local/bin/wings
-docker rm -f $(docker ps -a -q) 2>/dev/null
-echo -e "${GREEN}[DONE]${NC}"
+docker rm -f $(docker ps -a -q) >/dev/null 2>&1
 
-# --- 4. INSTALL PANEL (PORT 80) ---
-echo -e "${CYAN}[JAVIX] Setting up Panel on Port 80...${NC}"
-
-# Install Docker
+echo -e "${CYAN}[JAVIX]${NC} Installing Docker & Dependencies..."
 if ! command -v docker &> /dev/null; then
-    curl -sSL https://get.docker.com/ | CHANNEL=stable bash
+    curl -sSL https://get.docker.com/ | CHANNEL=stable bash >/dev/null 2>&1
 fi
-systemctl enable --now docker
-systemctl enable --now mariadb
+systemctl enable --now docker >/dev/null 2>&1
+systemctl enable --now mariadb >/dev/null 2>&1
 
-# Setup Database
-mysql -u root -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY 'javix123';"
-mysql -u root -e "CREATE DATABASE IF NOT EXISTS panel;"
-mysql -u root -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
-mysql -u root -e "FLUSH PRIVILEGES;"
+# --- 5. PANEL INSTALLATION LOGIC ---
+if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "3" ]; then
+    echo -e "${CYAN}[JAVIX]${NC} Installing Panel..."
+    
+    # Database Setup
+    mysql -u root -e "CREATE USER IF NOT EXISTS 'pterodactyl'@'127.0.0.1' IDENTIFIED BY 'javix123';"
+    mysql -u root -e "CREATE DATABASE IF NOT EXISTS panel;"
+    mysql -u root -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
+    mysql -u root -e "FLUSH PRIVILEGES;"
 
-# Setup Files
-mkdir -p /var/www/pterodactyl
-cd /var/www/pterodactyl
-curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
-tar -xzvf panel.tar.gz
-chmod -R 755 storage bootstrap/cache
+    # Files
+    mkdir -p /var/www/pterodactyl
+    cd /var/www/pterodactyl
+    curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz >/dev/null 2>&1
+    tar -xzvf panel.tar.gz >/dev/null 2>&1
+    chmod -R 755 storage bootstrap/cache
 
-# Install PHP & Composer
-apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip}
-curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    # PHP Setup
+    apt-get install -y php8.1 php8.1-{cli,gd,mysql,pdo,mbstring,tokenizer,bcmath,xml,fpm,curl,zip} >/dev/null 2>&1
+    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer >/dev/null 2>&1
+    cp .env.example .env
+    composer install --no-dev --optimize-autoloader --no-interaction >/dev/null 2>&1
+    php artisan key:generate --force >/dev/null 2>&1
 
-cp .env.example .env
-composer install --no-dev --optimize-autoloader --no-interaction
-php artisan key:generate --force
+    # --- ENVIRONMENT SPECIFIC CONFIG ---
+    if [ "$ENV_TYPE" == "1" ]; then
+        # PAID VPS: Ask for Domain
+        echo -e "${YELLOW}Enter your Domain (FQDN) for SSL:${NC}"
+        read FQDN
+        sed -i "s|APP_URL=http://localhost|APP_URL=https://${FQDN}|g" .env
+        sed -i "s|APP_URL=https://panel.example.com|APP_URL=https://${FQDN}|g" .env
+        php artisan p:environment:setup --author=admin@javix.com --url=https://$FQDN --timezone=UTC --cache=redis --session=redis --queue=redis --redis-host=127.0.0.1 --redis-pass= --redis-port=6379 >/dev/null 2>&1
+    
+    elif [ "$ENV_TYPE" == "2" ]; then
+        # CODESANDBOX: Force Localhost Port 80
+        echo -e "${GREEN}Configuring for CodeSandbox (Port 80)...${NC}"
+        sed -i "s|APP_URL=http://localhost|APP_URL=http://localhost|g" .env
+        sed -i "s|APP_URL=https://panel.example.com|APP_URL=http://localhost|g" .env
+        sed -i 's/DB_PASSWORD=/DB_PASSWORD=javix123/g' .env
+        
+        # Start Server on Port 80
+        fuser -k 80/tcp >/dev/null 2>&1
+        nohup php artisan serve --host=0.0.0.0 --port=80 > panel.log 2>&1 &
+        FQDN="localhost"
 
-# --- CONFIGURATION FOR CODESANDBOX ---
-sed -i 's/DB_PASSWORD=/DB_PASSWORD=javix123/g' .env
-sed -i "s|APP_URL=http://localhost|APP_URL=http://localhost|g" .env
-sed -i "s|APP_URL=https://panel.example.com|APP_URL=http://localhost|g" .env
+    elif [ "$ENV_TYPE" == "3" ]; then
+        # CODESPACES: Tunnel Mode
+        echo -e "${GREEN}Configuring for GitHub Codespaces (Tunnel)...${NC}"
+        # Install Cloudflared
+        curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >/dev/null 2>&1
+        dpkg -i cloudflared.deb >/dev/null 2>&1
+        cloudflared tunnel --url http://localhost:80 > tunnel.log 2>&1 &
+        sleep 5
+        FQDN=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
+        sed -i "s|APP_URL=http://localhost|APP_URL=${FQDN}|g" .env
+        sed -i "s|APP_URL=https://panel.example.com|APP_URL=${FQDN}|g" .env
+    fi
 
-php artisan migrate --seed --force
-php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+    # Finalize Panel
+    php artisan migrate --seed --force >/dev/null 2>&1
+    php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
+fi
 
-# Serve the panel on Port 80 (Explicitly Binding)
-# We kill any old process on port 80 first
-fuser -k 80/tcp 2>/dev/null
-nohup php artisan serve --host=0.0.0.0 --port=80 > panel.log 2>&1 &
+# --- 6. WINGS INSTALLATION LOGIC ---
+if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
+    echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
+    mkdir -p /etc/pterodactyl
+    curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
+    chmod u+x /usr/local/bin/wings
+fi
 
-# --- 5. INSTALL WINGS ---
-echo -e "${CYAN}[JAVIX] Installing Wings...${NC}"
-mkdir -p /etc/pterodactyl
-curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64"
-chmod u+x /usr/local/bin/wings
-
-# --- 6. THE CHEAT SHEET ---
+# --- 7. FINAL OUTPUT & WINGS CONFIG ---
 logo
-echo -e "${GREEN}PANEL INSTALLED!${NC}"
-echo -e "Login: ${CYAN}admin@javix.com${NC} / ${CYAN}javix123${NC}"
-echo ""
-echo -e "${YELLOW}--- ACTION REQUIRED: CREATE YOUR NODE ---${NC}"
-echo "1. Open the Panel (Check CodeSandbox 'PORTS' tab -> Port 80)."
-echo "2. Go to Admin -> Locations -> Create New (Name it 'Home')."
-echo "3. Go to Admin -> Nodes -> Create New."
-echo ""
-echo -e "${CYAN}--- COPY THESE EXACT VALUES INTO THE FORM ---${NC}"
-echo -e "Name:                  ${GREEN}Javix-Node${NC}"
-echo -e "Location:              ${GREEN}Home${NC}"
-echo -e "FQDN:                  ${GREEN}localhost${NC}   <-- IMPORTANT!"
-echo -e "Communicate Over SSL:  ${GREEN}Use HTTP Connection${NC}"
-echo -e "Behind Proxy:          ${GREEN}Not Behind Proxy${NC}"
-echo -e "Total Memory:          ${GREEN}4096${NC}"
-echo -e "Total Disk:            ${GREEN}10000${NC}"
-echo -e "Daemon Port:           ${GREEN}8080${NC}"
-echo -e "Daemon SFTP Port:      ${GREEN}2022${NC}"
-echo -e "${CYAN}---------------------------------------------${NC}"
-echo ""
-echo "4. Click 'Create Node'."
-echo "5. Click the 'Configuration' tab."
+echo "=========================================="
+echo "      INSTALLATION COMPLETE"
+echo "=========================================="
+if [ "$ENV_TYPE" == "2" ]; then
+    echo "MODE: CodeSandbox (Port 80)"
+    echo "1. Open 'PORTS' tab -> Port 80."
+    echo "2. Create Node FQDN: localhost"
+elif [ "$ENV_TYPE" == "3" ]; then
+    echo "MODE: Tunnel (Public URL)"
+    echo "URL: $FQDN"
+    echo "2. Create Node FQDN: (The URL above without https://)"
+else
+    echo "MODE: Paid VPS"
+    echo "URL: https://$FQDN"
+fi
+echo "=========================================="
+echo "Login: admin@javix.com / javix123"
+echo "=========================================="
 echo ""
 
-# WIZARD INPUTS
-echo -e "${YELLOW}--- NOW PASTE THE INFO HERE ---${NC}"
-
-# 1. Ask for Panel URL
-echo -e "${CYAN}1. Enter your Panel URL (Copy from browser address bar):${NC}"
-read -r INPUT_URL
-
-# 2. Ask for Token
-echo -e "${CYAN}2. Enter the Token (The long text starting with 'ptla_'):${NC}"
-read -r INPUT_TOKEN
-
-# 3. Ask for UUID 
-echo -e "${CYAN}3. Enter the Node UUID (e.g. 848d7s...):${NC}"
-read -r INPUT_UUID
-
-echo ""
-echo -e "${YELLOW}Applying Configuration...${NC}"
-
-# Manually run the configure command using the inputs
-wings configure --panel-url "$INPUT_URL" --token "$INPUT_TOKEN" --node "$INPUT_UUID" --allow-cors-origins "*" 
-
-# --- 7. START WINGS & SHOW FINAL SCREEN ---
-echo -e "${YELLOW}Starting Wings...${NC}"
-wings --debug > wings.log 2>&1 &
-
-sleep 3
-clear
-echo -e "${CYAN}"
-echo "       ██╗ █████╗ ██╗   ██╗██╗██╗  ██╗"
-echo "       ██║██╔══██╗██║   ██║██║╚██╗██╔╝"
-echo "       ██║███████║██║   ██║██║ ╚███╔╝ "
-echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
-echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
-echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-echo -e "${GREEN}      :: SYSTEM ONLINE ::${NC}"
-echo ""
-echo -e "   Status: ${GREEN}WINGS RUNNING ON LOCALHOST${NC}"
-echo -e "   Note:   If you see a Red Heart, restart this Devbox."
+if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
+    echo -e "${YELLOW}PASTE YOUR 'wings configure' COMMAND BELOW:${NC}"
+    read WINGS_CMD
+    echo "Configuring Wings..."
+    eval "$WINGS_CMD"
+    wings --debug > wings.log 2>&1 &
+    echo -e "${GREEN}SUCCESS! Wings is running.${NC}"
+fi
