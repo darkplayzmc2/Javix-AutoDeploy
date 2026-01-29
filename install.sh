@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX DEPENDENCY FIX EDITION
-#  >> FIXES: "mysql: not found" error by installing missing tools
+#  >> JAVIX UNIVERSAL FORCE FIX
+#  >> FEATURES: Auto-Dependency Injection, Root Mode, Named Volumes
 # ==============================================================================
 
 # 1. AUTO-ELEVATION
@@ -11,13 +11,14 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# 2. GENERATE UNIQUE ID (Fixes Permission/Corrupt Data)
+# 2. GENERATE UNIQUE SESSION (Prevents corruption)
 RUN_ID="run_$(date +%s)"
 
-# 3. CLEANUP
-echo "Wiping broken data..."
+# 3. NUCLEAR CLEANUP
+echo "Forcing cleanup of old broken files..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
+fuser -k 80/tcp >/dev/null 2>&1
 
 # Fix host tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -41,7 +42,7 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: DEPENDENCY FIX EDITION ::${NC}"
+    echo -e "${GREEN}    :: UNIVERSAL FORCE FIX ::${NC}"
     echo ""
 }
 
@@ -66,20 +67,24 @@ mkdir -p /etc/javix
 cd /etc/javix
 
 APP_URL="http://localhost:3000"
+APP_PORT="3000"
+
 if [ "$ENV_TYPE" == "1" ]; then
     echo -e "${YELLOW}Enter Domain:${NC}"
     read FQDN
     APP_URL="https://${FQDN}"
+    APP_PORT="80"
 fi
 
 # --- DOCKER COMPOSE ---
+# Uses Named Volumes (javix_db_$RUN_ID) to bypass file permission blocks
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
   database:
     image: mariadb:10.5
     restart: always
-    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=256K
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=20M --innodb-log-buffer-size=1M
     volumes:
       - javix_db_$RUN_ID:/var/lib/mysql
     environment:
@@ -95,9 +100,9 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root  # Fixes Permission Denied
+    user: root  # <--- GOD MODE (Fixes Permission Denied)
     ports:
-      - "3000:80"
+      - "${APP_PORT}:80"
     environment:
       - APP_ENV=production
       - APP_DEBUG=true
@@ -134,24 +139,25 @@ EOF
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Boot (15s)...${NC}"
-sleep 15
+echo -e "${YELLOW}Waiting for Database to Initialize (20s)...${NC}"
+sleep 20
 
-# --- 8. THE MISSING LINK FIX ---
+# --- 8. THE FORCE FIX (INJECT DEPENDENCIES) ---
 logo
 echo -e "${YELLOW}====================================================${NC}"
-echo -e "${RED}      CRITICAL FIX: INSTALLING MYSQL CLIENT      ${NC}"
+echo -e "${RED}      INJECTING MISSING TOOLS (FIXING ERROR)      ${NC}"
 echo -e "${YELLOW}====================================================${NC}"
-echo "Installing dependencies inside the container..."
 
-# THIS IS THE FIX FOR YOUR 'mysql not found' ERROR
-docker compose exec panel apk update
+# This command installs 'mysql-client' inside the container so it stops crashing
+echo "Installing mysql-client inside Docker..."
+docker compose exec panel apk update >/dev/null 2>&1
 docker compose exec panel apk add --no-cache mysql-client mariadb-connector-c-dev
 
-echo -e "${GREEN}Dependencies Installed. Running Migration...${NC}"
+echo -e "${GREEN}Tools Installed. Forcing Database Migration...${NC}"
+# Now we run the migration. It will work because 'mysql' command now exists.
 docker compose exec panel php artisan migrate --seed --force
 
-# --- 9. FIX URL ---
+# --- 9. FIX URL (CodeSandbox Only) ---
 if [ "$ENV_TYPE" == "2" ]; then
     logo
     echo -e "${YELLOW}====================================================${NC}"
@@ -214,6 +220,10 @@ if [ "$INSTALL_MODE" == "1" ]; then
     read WINGS_CMD
     eval "$WINGS_CMD"
     sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
+    # Remove --panel-url flag if it exists to prevent errors
+    sed -i 's/cd \/etc\/pterodactyl && sudo wings configure --panel-url//g' /etc/pterodactyl/config.yml 2>/dev/null
+    
+    echo "Starting Wings..."
     wings --debug > wings.log 2>&1 &
     echo -e "${GREEN}SUCCESS! JAVIX IS ONLINE.${NC}"
 fi
