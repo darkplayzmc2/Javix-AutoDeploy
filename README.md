@@ -15,4 +15,4 @@ The futuristic, all-in-one Pterodactyl installer by **sk mohsin pasha**.
 ## 📦 How to Install
 Run this single command in your terminal:
 ```bash
-bash <(curl -s [https://raw.githubusercontent.com/darkplayzmc2/Javix-AutoDeploy/main/install.sh](https://raw.githubusercontent.com/darkplayzmc2/Javix-AutoDeploy/main/install.sh))
+bash <(curl -s https://raw.githubusercontent.com/darkplayzmc2/Javix-AutoDeploy/main/install.sh)
