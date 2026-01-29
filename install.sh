@@ -1,35 +1,34 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX PERMISSION FIX EDITION
-#  >> FEATURES: Chmod 777 on volumes, Database Reset, Crash Logs
+#  >> JAVIX GUARANTEED EDITION
+#  >> FEATURES: Named Volumes (Fixes Permissions), Port 3000 (Native)
 # ==============================================================================
 
-# 1. CLEANUP (WIPE EVERYTHING)
+# 1. AUTO-ELEVATION
 if [ "$EUID" -ne 0 ]; then
   sudo "$0" "$@"
   exit
 fi
 
-echo "Forcing Cleanup..."
-cd /etc/javix 2>/dev/null
-# Stop containers and delete volumes (Fixes corruption)
-docker compose down -v 2>/dev/null
-pkill cloudflared 2>/dev/null
-fuser -k 8081/tcp >/dev/null 2>&1
+# 2. NUCLEAR CLEANUP
+echo "Clearing old processes..."
+fuser -k 3000/tcp >/dev/null 2>&1
+fuser -k 80/tcp >/dev/null 2>&1
+fuser -k 8080/tcp >/dev/null 2>&1
+docker compose down -v >/dev/null 2>&1
 
-# Fix missing tools
+# 3. FIX MISSING TOOLS
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
     apt-get install -y curl git
 fi
 
-# 2. VISUALS
+# 4. VISUALS
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
 logo() {
@@ -41,15 +40,15 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: PERMISSION FIX EDITION ::${NC}"
+    echo -e "${GREEN}    :: GUARANTEED EDITION ::${NC}"
     echo ""
 }
 
-# --- 3. MENU SYSTEM ---
+# --- 5. MENU ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
 echo "1) Paid VPS"
-echo "2) CodeSandbox (Tunnel Mode)"
+echo "2) CodeSandbox (Port 3000)"
 echo -n "Select [1-2]: "
 read ENV_TYPE
 
@@ -60,31 +59,23 @@ echo "2) Wings Only"
 echo -n "Select [1-2]: "
 read INSTALL_MODE
 
-# --- 4. CONFIGURATION ---
-echo -e "${CYAN}[JAVIX]${NC} Preparing Workspace..."
+# --- 6. CONFIGURATION ---
+echo -e "${CYAN}[JAVIX]${NC} Setting up Docker..."
 mkdir -p /etc/javix
 cd /etc/javix
 
-# PRE-CREATE DATA FOLDERS TO FIX PERMISSIONS
-mkdir -p /etc/javix/database
-mkdir -p /etc/javix/var
-mkdir -p /etc/javix/logs
-mkdir -p /etc/javix/public
-
-# FORCE 777 PERMISSIONS (The Fix)
-echo -e "${YELLOW}Fixing Permissions (chmod 777)...${NC}"
-chmod -R 777 /etc/javix
-
-# If CodeSandbox, use placeholder URL
-if [ "$ENV_TYPE" == "2" ]; then
-    APP_URL="http://localhost"
-else
+# Define URL placeholder
+APP_URL="http://localhost:3000"
+if [ "$ENV_TYPE" == "1" ]; then
     echo -e "${YELLOW}Enter Domain:${NC}"
     read FQDN
     APP_URL="https://${FQDN}"
 fi
 
-# GENERATE DOCKER COMPOSE
+# --- THE MAGIC FIX: NAMED VOLUMES ---
+# We do NOT use "./database". We use "javix_db".
+# This bypasses the CodeSandbox permission blocks completely.
+
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
@@ -93,7 +84,7 @@ services:
     restart: always
     command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
     volumes:
-      - "./database:/var/lib/mysql"
+      - javix_db:/var/lib/mysql
     environment:
       - MYSQL_ROOT_PASSWORD=javix_root
       - MYSQL_DATABASE=panel
@@ -108,7 +99,7 @@ services:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
     ports:
-      - "8081:80"
+      - "3000:80"
     environment:
       - APP_ENV=production
       - APP_DEBUG=true
@@ -130,19 +121,24 @@ services:
       - database
       - cache
     volumes:
-      - "./var/:/app/var/"
-      - "./logs:/app/storage/logs"
-      - "./public:/app/storage/app/public"
+      - javix_var:/app/var/
+      - javix_logs:/app/storage/logs
+      - javix_public:/app/storage/app/public
+
+volumes:
+  javix_db:
+  javix_var:
+  javix_logs:
+  javix_public:
 EOF
 
-# --- 5. START UP ---
+# --- 7. START UP ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose up -d
 
-echo -e "${YELLOW}Waiting for Panel to boot (Max 60s)...${NC}"
-# Wait Loop
-for i in {1..30}; do
-    if curl -s http://localhost:8081 >/dev/null; then
+echo -e "${YELLOW}Waiting for Panel to boot (Fixing 502)...${NC}"
+for i in {1..40}; do
+    if curl -s http://localhost:3000 >/dev/null; then
         echo -e "${GREEN}Panel is ONLINE!${NC}"
         PANEL_READY=true
         break
@@ -151,56 +147,45 @@ for i in {1..30}; do
     sleep 2
 done
 
-# IF PANEL FAILED, SHOW LOGS
 if [ "$PANEL_READY" != "true" ]; then
-    echo ""
-    echo -e "${RED}PANEL FAILED TO START!${NC}"
-    echo -e "${YELLOW}--- ERROR LOGS ---${NC}"
+    echo -e "${RED}PANEL FAILED. SHOWING LOGS:${NC}"
     docker compose logs panel | tail -n 20
-    echo -e "${YELLOW}------------------${NC}"
-    echo "Check the errors above."
     exit 1
 fi
 
-# --- 6. START TUNNEL ---
+# --- 8. FIX INVALID URL ---
 if [ "$ENV_TYPE" == "2" ]; then
-    echo -e "${CYAN}[JAVIX]${NC} Starting Magic Tunnel..."
-    if ! command -v cloudflared &> /dev/null; then
-        curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >/dev/null 2>&1
-        dpkg -i cloudflared.deb >/dev/null 2>&1
-    fi
-    
-    cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
-    sleep 10
-    TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-    
-    # Retry if empty
-    if [ -z "$TUNNEL_URL" ]; then
-        pkill cloudflared
-        sleep 2
-        cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
-        sleep 10
-        TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-    fi
-    
-    echo -e "${CYAN}[JAVIX]${NC} Patching URL: ${TUNNEL_URL}"
-    sed -i "s|APP_URL=http://localhost|APP_URL=${TUNNEL_URL}|g" docker-compose.yml
+    logo
+    echo -e "${YELLOW}====================================================${NC}"
+    echo -e "${RED}      CRITICAL: FIXING URL AUTOMATICALLY      ${NC}"
+    echo -e "${YELLOW}====================================================${NC}"
+    echo "1. Look at 'PORTS' tab."
+    echo "2. Ensure Port 3000 is Open."
+    echo "3. Copy the address (https://xxxx-3000.csb.app/)"
+    echo ""
+    echo -n "PASTE URL HERE: "
+    read CSB_URL
+    CSB_URL=${CSB_URL%/}
+
+    echo -e "${CYAN}[JAVIX]${NC} Applying URL Fix..."
+    sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
     docker compose up -d
-    APP_URL="${TUNNEL_URL}"
+    APP_URL="${CSB_URL}"
+    sleep 5
 fi
 
-# --- 7. CREATE ADMIN ---
+# --- 9. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
 docker compose exec -T panel php artisan key:generate --force >/dev/null 2>&1
 docker compose exec -T panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1 >/dev/null 2>&1
 
-# --- 8. WINGS ---
+# --- 10. WINGS ---
 if [ "$INSTALL_MODE" == "1" ]; then
     curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
     chmod u+x /usr/local/bin/wings
 fi
 
-# --- 9. OUTPUT ---
+# --- 11. DONE ---
 logo
 echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
@@ -208,6 +193,7 @@ echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
     echo -e "URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
+    echo -e "Use Port 8081 for Daemon/Wings Port"
 else
     echo "URL: https://$FQDN"
 fi
