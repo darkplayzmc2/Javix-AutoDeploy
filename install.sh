@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX TUNNEL EDITION (THE FINAL SOLUTION)
-#  >> FEATURES: Bypasses CodeSandbox Ports completely using Cloudflare Tunnel
+#  >> JAVIX STABILITY EDITION
+#  >> FEATURES: Low-RAM Database, "Wait-for-Panel" Check, Tunnel Fix
 # ==============================================================================
 
 # 1. CLEANUP & PREP
@@ -11,12 +11,11 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
-# Kill any stuck processes
-echo "Killing zombie processes..."
+# Kill old processes
+echo "Cleaning up..."
 docker compose down >/dev/null 2>&1
-fuser -k 80/tcp >/dev/null 2>&1
-fuser -k 3000/tcp >/dev/null 2>&1
-fuser -k 8080/tcp >/dev/null 2>&1
+pkill cloudflared
+fuser -k 8081/tcp >/dev/null 2>&1
 
 # Fix missing tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -40,11 +39,11 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: MAGIC TUNNEL EDITION ::${NC}"
+    echo -e "${GREEN}    :: STABILITY EDITION ::${NC}"
     echo ""
 }
 
-# --- 3. THE MENU SYSTEM (RESTORED) ---
+# --- 3. THE MENU SYSTEM ---
 logo
 echo -e "${YELLOW}--- ENVIRONMENT SELECTION ---${NC}"
 echo "1) Paid VPS (DigitalOcean, AWS)"
@@ -57,9 +56,8 @@ echo ""
 echo -e "${YELLOW}--- COMPONENT SELECTION ---${NC}"
 echo "1) Full Stack (Panel + Wings)"
 echo "2) Wings Only"
-echo "3) Panel Only"
 echo ""
-echo -n "Select install mode [1-3]: "
+echo -n "Select install mode [1-2]: "
 read INSTALL_MODE
 
 # --- ADD-ONS ---
@@ -80,44 +78,19 @@ if ! command -v docker &> /dev/null; then
     sh get-docker.sh >/dev/null 2>&1
 fi
 
-# --- 5. SETUP TUNNEL (BYPASS PORTS) ---
+# --- 5. CONFIGURATION ---
+echo -e "${CYAN}[JAVIX]${NC} Configuring Low-RAM Mode..."
+mkdir -p /etc/javix
+cd /etc/javix
+
+# If CodeSandbox, we use a placeholder URL first
 if [ "$ENV_TYPE" == "2" ]; then
-    echo -e "${CYAN}[JAVIX]${NC} Installing Cloudflare Tunnel..."
-    if ! command -v cloudflared &> /dev/null; then
-        curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >/dev/null 2>&1
-        dpkg -i cloudflared.deb >/dev/null 2>&1
-    fi
-    
-    # Start Tunnel on internal port 8081 (We will put panel here)
-    echo -e "${YELLOW}Starting Magic Tunnel... (Please Wait)${NC}"
-    cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
-    
-    # Wait for URL
-    sleep 8
-    TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-    
-    # If failed, retry once
-    if [ -z "$TUNNEL_URL" ]; then
-        pkill cloudflared
-        sleep 2
-        cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
-        sleep 10
-        TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
-    fi
-    
-    APP_URL="${TUNNEL_URL}"
-    echo -e "${GREEN}Tunnel Online: ${APP_URL}${NC}"
-else
     APP_URL="http://localhost"
+else
     echo -e "${YELLOW}Enter Domain:${NC}"
     read FQDN
     APP_URL="https://${FQDN}"
 fi
-
-# --- 6. CREATE DOCKER CONFIG ---
-echo -e "${CYAN}[JAVIX]${NC} Configuring Panel..."
-mkdir -p /etc/javix
-cd /etc/javix
 
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -125,7 +98,7 @@ services:
   database:
     image: mariadb:10.5
     restart: always
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
     volumes:
       - "/var/lib/javix/database:/var/lib/mysql"
     environment:
@@ -169,13 +142,52 @@ services:
       - "/var/www/javix/storage/app/public:/app/storage/app/public"
 EOF
 
-# --- 7. START PANEL ---
+# --- 6. START PANEL (WAIT FOR BOOT) ---
 echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
 docker compose down >/dev/null 2>&1
 docker compose up -d
 
-echo "Waiting for Database (10s)..."
-sleep 10
+echo -e "${YELLOW}Waiting for Panel to boot (this fixes 502 error)...${NC}"
+# Loop until port 8081 is active
+for i in {1..30}; do
+    if curl -s http://localhost:8081 >/dev/null; then
+        echo -e "${GREEN}Panel is UP!${NC}"
+        break
+    fi
+    echo -n "."
+    sleep 2
+done
+
+# --- 7. START TUNNEL (ONLY IF PANEL IS UP) ---
+if [ "$ENV_TYPE" == "2" ]; then
+    echo -e "${CYAN}[JAVIX]${NC} Installing Cloudflare Tunnel..."
+    if ! command -v cloudflared &> /dev/null; then
+        curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >/dev/null 2>&1
+        dpkg -i cloudflared.deb >/dev/null 2>&1
+    fi
+    
+    echo -e "${YELLOW}Starting Magic Tunnel...${NC}"
+    cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
+    
+    sleep 8
+    TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
+    
+    # Retry logic
+    if [ -z "$TUNNEL_URL" ]; then
+        pkill cloudflared
+        sleep 2
+        cloudflared tunnel --url http://localhost:8081 > tunnel.log 2>&1 &
+        sleep 10
+        TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare.com' tunnel.log | head -1)
+    fi
+    
+    # FIX PANEL URL
+    echo -e "${CYAN}[JAVIX]${NC} Patching Panel URL to: ${TUNNEL_URL}"
+    sed -i "s|APP_URL=http://localhost|APP_URL=${TUNNEL_URL}|g" docker-compose.yml
+    docker compose up -d
+    
+    APP_URL="${TUNNEL_URL}"
+fi
 
 # --- 8. CREATE ADMIN ---
 echo -e "${CYAN}[JAVIX]${NC} Creating Admin User..."
@@ -195,7 +207,7 @@ echo "=========================================="
 echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
 if [ "$ENV_TYPE" == "2" ]; then
-    echo -e "${YELLOW}DO NOT USE THE PORTS TAB!${NC}"
+    echo -e "${YELLOW}DO NOT USE PORTS TAB!${NC}"
     echo -e "USE THIS URL: ${GREEN}${APP_URL}${NC}"
     echo -e "Node FQDN: ${GREEN}localhost${NC}"
 else
@@ -211,7 +223,6 @@ if [ "$INSTALL_MODE" == "1" ] || [ "$INSTALL_MODE" == "2" ]; then
     echo "Configuring..."
     eval "$WINGS_CMD"
     
-    # Fix Docker networking
     sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
     
     echo "Starting Wings..."
