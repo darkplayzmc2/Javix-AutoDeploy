@@ -1,25 +1,22 @@
 #!/bin/bash
 
 # ==============================================================================
-#  >> JAVIX SEQUENTIAL EDITION (NO CRASH)
-#  >> FEATURES: Installs Database FIRST, then Panel, then Wings. Saves RAM.
+#  >> JAVIX INTERACTIVE ROOT EDITION
+#  >> FEATURES: Runs as ROOT (Fixes Permissions), Asks for Admin Details
 # ==============================================================================
 
-# 1. CHECK ROOT
+# 1. AUTO-ELEVATION
 if [ "$EUID" -ne 0 ]; then
   sudo "$0" "$@"
   exit
 fi
 
-# 2. CLEANUP & PREP
-RUN_ID="run_$(date +%s)"
-echo "Starting Install (Session: $RUN_ID)..."
-
-echo "Stopping old containers..."
+# 2. CLEANUP (Wipe broken data)
+echo "Wiping broken installation..."
 docker compose down -v >/dev/null 2>&1
 fuser -k 3000/tcp >/dev/null 2>&1
 
-# Fix tools
+# Fix missing tools
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 if ! command -v curl &> /dev/null; then
     apt-get update -y -q
@@ -41,28 +38,49 @@ logo() {
     echo "  ██   ██║██╔══██║╚██╗ ██╔╝██║ ██╔██╗ "
     echo "  ╚█████╔╝██║  ██║ ╚████╔╝ ██║██╔╝ ██╗"
     echo "   ╚════╝ ╚═╝  ╚═╝  ╚═══╝  ╚═╝╚═╝  ╚═╝"
-    echo -e "${GREEN}    :: SEQUENTIAL INSTALLER ::${NC}"
+    echo -e "${GREEN}    :: INTERACTIVE ROOT EDITION ::${NC}"
     echo ""
 }
 
-# --- 4. CONFIGURATION ---
+# --- 4. MENU SYSTEM ---
 logo
-echo -e "${CYAN}[JAVIX]${NC} Setting up Workspace..."
+echo -e "${YELLOW}--- ENVIRONMENT ---${NC}"
+echo "1) Paid VPS"
+echo "2) CodeSandbox (Port 3000)"
+echo -n "Select [1-2]: "
+read ENV_TYPE
+
+echo ""
+echo -e "${YELLOW}--- INSTALL MODE ---${NC}"
+echo "1) Full Stack"
+echo "2) Wings Only"
+echo -n "Select [1-2]: "
+read INSTALL_MODE
+
+# --- 5. CONFIGURATION ---
+echo -e "${CYAN}[JAVIX]${NC} Preparing Docker..."
 mkdir -p /etc/javix
 cd /etc/javix
 
 APP_URL="http://localhost:3000"
+if [ "$ENV_TYPE" == "1" ]; then
+    echo -e "${YELLOW}Enter Domain:${NC}"
+    read FQDN
+    APP_URL="https://${FQDN}"
+fi
 
-# --- DOCKER COMPOSE (LOW RAM) ---
+# --- DOCKER COMPOSE (ROOT MODE) ---
+# We use 'user: root' to bypass ALL permission errors.
+
 cat > docker-compose.yml <<EOF
 version: '3.8'
 services:
   database:
     image: mariadb:10.5
     restart: always
-    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=256K --max-connections=20
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=10M --innodb-log-buffer-size=512K
     volumes:
-      - javix_db_$RUN_ID:/var/lib/mysql
+      - javix_db:/var/lib/mysql
     environment:
       - MYSQL_ROOT_PASSWORD=javix_root
       - MYSQL_DATABASE=panel
@@ -76,12 +94,12 @@ services:
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: always
-    user: root
+    user: root  # <--- THIS FIXES THE PERMISSION DENIED ERROR
     ports:
       - "3000:80"
     environment:
       - APP_ENV=production
-      - APP_DEBUG=false
+      - APP_DEBUG=true
       - APP_THEME=pterodactyl
       - APP_URL=${APP_URL}
       - APP_TIMEZONE=UTC
@@ -100,105 +118,92 @@ services:
       - database
       - cache
     volumes:
-      - javix_var_$RUN_ID:/app/var/
-      - javix_logs_$RUN_ID:/app/storage/logs
-      - javix_public_$RUN_ID:/app/storage/app/public
+      - javix_var:/app/var/
+      - javix_logs:/app/storage/logs
+      - javix_public:/app/storage/app/public
 
 volumes:
-  javix_db_$RUN_ID:
-  javix_var_$RUN_ID:
-  javix_logs_$RUN_ID:
-  javix_public_$RUN_ID:
+  javix_db:
+  javix_var:
+  javix_logs:
+  javix_public:
 EOF
 
-# --- 5. PHASE 1: DATABASE START ---
-logo
-echo -e "${YELLOW}Phase 1: Starting Database Only...${NC}"
-docker compose up -d database cache
+# --- 6. START UP ---
+echo -e "${CYAN}[JAVIX]${NC} Starting Containers..."
+docker compose up -d
 
-echo "Waiting for Database to wake up (15s)..."
+echo -e "${YELLOW}Waiting for Database (15s)...${NC}"
 sleep 15
 
-# --- 6. PHASE 2: PANEL SETUP (INTERACTIVE) ---
+# --- 7. DATABASE REPAIR (CRITICAL FIX) ---
+echo -e "${CYAN}[JAVIX]${NC} Repairing Database..."
+# This creates the missing 'settings' table that caused your error
+docker compose exec panel php artisan migrate --seed --force
+
+# --- 8. FIX URL ---
+if [ "$ENV_TYPE" == "2" ]; then
+    logo
+    echo -e "${YELLOW}====================================================${NC}"
+    echo -e "${RED}      CRITICAL: PASTE URL TO FINISH      ${NC}"
+    echo -e "${YELLOW}====================================================${NC}"
+    echo "1. Go to 'PORTS' tab."
+    echo "2. Ensure Port 3000 is Open."
+    echo "3. Copy address: https://xxxx-3000.csb.app/"
+    echo ""
+    echo -n "PASTE URL HERE: "
+    read CSB_URL
+    CSB_URL=${CSB_URL%/}
+
+    echo -e "${CYAN}[JAVIX]${NC} Patching URL..."
+    sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
+    docker compose up -d
+    APP_URL="${CSB_URL}"
+    sleep 5
+fi
+
+# --- 9. INTERACTIVE USER CREATION ---
 logo
-echo -e "${YELLOW}Phase 2: Running Pterodactyl Setup Commands...${NC}"
-echo -e "${CYAN}Running Migrations (Creating Tables)...${NC}"
+echo -e "${YELLOW}--- CREATE ADMIN USER ---${NC}"
+echo -n "Enter Email: "
+read ADMIN_EMAIL
+echo -n "Enter Username: "
+read ADMIN_USER
+echo -n "Enter First Name: "
+read ADMIN_FIRST
+echo -n "Enter Last Name: "
+read ADMIN_LAST
+echo -n "Enter Password: "
+read ADMIN_PASS
 
-# Start panel temporarily to run commands
-docker compose run --rm panel php artisan migrate --seed --force
+echo -e "${CYAN}[JAVIX]${NC} Creating User..."
+docker compose exec panel php artisan p:user:make --email="$ADMIN_EMAIL" --username="$ADMIN_USER" --name="$ADMIN_FIRST" --name-last="$ADMIN_LAST" --password="$ADMIN_PASS" --admin=1
 
-echo ""
-echo -e "${CYAN}Creating Admin User...${NC}"
-docker compose run --rm panel php artisan p:user:make --email=admin@javix.com --username=admin --name=Admin --password=javix123 --admin=1
+# --- 10. WINGS ---
+if [ "$INSTALL_MODE" == "1" ]; then
+    curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
+    chmod u+x /usr/local/bin/wings
+fi
 
-# --- 7. PHASE 3: PANEL BOOT ---
-logo
-echo -e "${YELLOW}Phase 3: Starting Web Panel...${NC}"
-docker compose up -d panel
-
-# --- 8. PHASE 4: URL FIX ---
-logo
-echo -e "${YELLOW}====================================================${NC}"
-echo -e "${RED}      CRITICAL: FIX THE URL TO CONTINUE      ${NC}"
-echo -e "${YELLOW}====================================================${NC}"
-echo "1. Go to 'PORTS' tab."
-echo "2. Ensure Port 3000 is Open."
-echo "3. Copy the address (e.g., https://abc-3000.csb.app/)"
-echo ""
-echo -n "PASTE URL HERE: "
-read CSB_URL
-CSB_URL=${CSB_URL%/}
-
-echo -e "${CYAN}[JAVIX]${NC} Applying URL..."
-sed -i "s|APP_URL=http://localhost:3000|APP_URL=${CSB_URL}|g" docker-compose.yml
-docker compose up -d
-APP_URL="${CSB_URL}"
-
-echo "Waiting for Panel to reload (10s)..."
-sleep 10
-
-# --- 9. PHASE 5: WINGS SETUP ---
+# --- 11. DONE ---
 logo
 echo "=========================================="
-echo "      PANEL INSTALLED SUCCESSFULLY"
+echo "      JAVIX INSTALLATION COMPLETE"
 echo "=========================================="
-echo -e "URL: ${GREEN}${APP_URL}${NC}"
-echo -e "Login: ${CYAN}admin@javix.com${NC} / ${CYAN}javix123${NC}"
+if [ "$ENV_TYPE" == "2" ]; then
+    echo -e "URL: ${GREEN}${APP_URL}${NC}"
+    echo -e "Node FQDN: ${GREEN}localhost${NC}"
+else
+    echo "URL: https://$FQDN"
+fi
+echo "Login with the details you just entered."
 echo "=========================================="
-echo ""
-echo -e "${YELLOW}--- NEXT STEPS FOR WINGS ---${NC}"
-echo "1. Open the Panel URL above."
-echo "2. Log in."
-echo "3. Go to Admin -> Locations -> Create 'Home'."
-echo "4. Go to Admin -> Nodes -> Create New."
-echo "   - Name: Node1"
-echo "   - FQDN: localhost"
-echo "   - RAM/Disk: 2048 / 10000"
-echo "   - Daemon Port: 8081"
-echo "5. Click 'Configuration' tab in the Node settings."
-echo "6. Copy the command block that starts with 'cd /etc/pterodactyl && sudo wings...'"
-echo ""
-echo -e "${RED}PASTE THE COMMAND BELOW TO INSTALL WINGS:${NC}"
-read WINGS_CMD
 
-echo ""
-echo -e "${CYAN}[JAVIX]${NC} Installing Wings..."
-curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_amd64" >/dev/null 2>&1
-chmod u+x /usr/local/bin/wings
-
-echo -e "${CYAN}[JAVIX]${NC} Configuring Wings..."
-eval "$WINGS_CMD"
-
-# Fix Wings Config for Docker
-sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
-sed -i 's/cd \/etc\/pterodactyl && sudo wings configure --panel-url//g' /etc/pterodactyl/config.yml 2>/dev/null
-
-echo -e "${GREEN}[JAVIX]${NC} Starting Wings..."
-wings --debug > wings.log 2>&1 &
-
-echo ""
-echo "=========================================="
-echo "      FULL INSTALLATION COMPLETE"
-echo "=========================================="
-echo "Panel & Wings are running."
-echo "You can now create servers."
+if [ "$INSTALL_MODE" == "1" ]; then
+    echo -e "${YELLOW}PASTE 'wings configure' COMMAND:${NC}"
+    read WINGS_CMD
+    eval "$WINGS_CMD"
+    sed -i 's/0.0.0.0/0.0.0.0/g' /etc/pterodactyl/config.yml
+    wings --debug > wings.log 2>&1 &
+    echo -e "${GREEN}SUCCESS! JAVIX IS ONLINE.${NC}"
+fi
